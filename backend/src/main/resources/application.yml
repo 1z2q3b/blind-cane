@@ -1,0 +1,113 @@
+server:
+  # 8001：本机 8080 常被其它服务占用，故后端固定使用 8001。
+  # 需要临时换端口时用启动参数覆盖：--server.port=xxxx，不要改这里。
+  port: 8001
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: blind-cane-guardian
+  profiles:
+    active: dev
+  # 载入项目根目录下的 local-secrets.yml（存放数据库口令等敏感项，已 gitignore）。
+  # 用 optional: 前缀，文件不存在时不报错；只定义 MYSQL_PASSWORD 这类占位符变量，
+  # 不直接覆盖 spring.datasource.*，因此不会与 profile 配置产生优先级歧义。
+  config:
+    import: optional:file:./local-secrets.yml
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+    default-property-inclusion: non_null
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    encoding: UTF-8
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  type-aliases-package: com.blindcane.guardian.modules
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+
+# =============================================================
+# 业务配置。所有「可插拔」能力都集中在这里，缺密钥即自动降级为 Mock。
+# =============================================================
+blindcane:
+  jwt:
+    # 生产环境必须用环境变量 JWT_SECRET 覆盖，勿使用此默认值
+    secret: ${JWT_SECRET:blindcane-dev-only-jwt-secret-please-change-32bytes}
+    issuer: blind-cane-guardian
+    access-token-ttl-minutes: 120   # 2 小时
+    refresh-token-ttl-days: 7       # 7 天
+  sms:
+    # false = 走 Mock：验证码固定 123456，并打印到日志（提示词 9.1）
+    enabled: ${SMS_ENABLED:false}
+    mock-code: "123456"
+    interval-seconds: 60            # 同一手机号发码间隔
+    code-ttl-seconds: 300           # 验证码有效期 5 分钟
+    max-per-day: 10                 # 单手机号每日上限
+  jpush:
+    # false = 仅走 WebSocket + 日志，App 侧降级为本地通知（提示词 9.3）
+    enabled: ${JPUSH_ENABLED:false}
+    app-key: ${JPUSH_APP_KEY:}
+    master-secret: ${JPUSH_MASTER_SECRET:}
+  amap:
+    # Web 服务 Key（逆地理编码）。为空时后端返回原始坐标，不阻塞（提示词 9.4）
+    web-key: ${AMAP_WEB_KEY:}
+  crypto:
+    # 用于 ward.medical_notes 的 AES-GCM 加密，实际密钥由该字符串 SHA-256 派生，
+    # 因此长度不限；生产环境请用环境变量覆盖
+    aes-secret: ${AES_SECRET:blindcane-dev-only-aes-secret}
+  simulator:
+    # 设备模拟器总开关，生产 profile 置 false（提示词 9.5）
+    enabled: ${SIMULATOR_ENABLED:true}
+    demo-device-sn: BC-2024-DEMO01
+    demo-device-name: 演示导盲杖
+    demo-firmware: v0.9.2-demo
+    # 模拟器起点：郑州市 · 华北水利水电大学龙子湖校区附近
+    origin-lng: 113.7845
+    origin-lat: 34.8133
+    report-interval-ms: 10000       # 位置上报周期（10 秒）
+    position-drift-enabled: true    # 自动随机游走；演示冻结轨迹或跑验证脚本时可置 false
+    step-meters: 1.0                # 单次位移约 1 米，模拟步行速度
+    initial-battery: 85
+    battery-decay-cron: "0 0 * * * *"   # 每小时整点电量 -1%
+    fall-confirm-timeout-seconds: 30    # 疑似跌倒自动升级为正式告警的等待时长
+  device:
+    offline-threshold-minutes: 5    # 超过该时长未上报判定离线（提示词 4.4）
+    offline-scan-interval-ms: 60000 # 离线扫描周期 60 秒
+    low-battery-threshold: 20       # 低于该电量产生 LOW_BATTERY 告警
+    low-battery-step: 10            # 电量阶梯去重粒度：每跌 10% 才再告警
+  location:
+    flush-batch-size: 200           # 批量落库阈值：满 200 条立即写
+    flush-interval-ms: 5000         # 或每 5 秒写一次
+    redis-ttl-minutes: 30           # 最新位置缓存 TTL
+  security:
+    # 无需认证即可访问的路径（Mock 接口是否放行由 simulator.enabled 决定）
+    permit-all-paths:
+      - /api/v1/auth/**
+      - /v3/api-docs/**
+      - /swagger-ui/**
+      - /swagger-ui.html
+      - /error
+
+logging:
+  level:
+    com.blindcane.guardian: debug
+    org.springframework.web.socket: info

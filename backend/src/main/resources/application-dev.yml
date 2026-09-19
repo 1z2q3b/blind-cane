@@ -1,0 +1,37 @@
+# =============================================================
+# 开发环境（默认 profile）
+# 默认指向本机 MySQL 8（3306）与 Redis（6379），不依赖 Docker。
+# 数据库密码通过环境变量 MYSQL_PASSWORD 注入，不要写死在文件里。
+# =============================================================
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # createDatabaseIfNotExist=true：首次启动自动建库，省掉手动 CREATE DATABASE
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:blind_cane_guardian}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      # 本机 Redis（D:\redis\redis.windows.conf）已配置 requirepass 123456，
+      # Lettuce 建连时会自动 AUTH；若服务端未开 requirepass 而这里又带密码会报
+      # "Client sent AUTH, but no password is set"，两者必须成对出现
+      password: ${REDIS_PASSWORD:123456}
+      # 固定使用 1 号库：与默认的 0 号库隔离，避免本机其它项目的数据互相污染，
+      # 所有缓存 / 验证码 / 黑名单 key 都落在同一个库里，便于统一清理
+      database: 1
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
+logging:
+  level:
+    com.blindcane.guardian: debug

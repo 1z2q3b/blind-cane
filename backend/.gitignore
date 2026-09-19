@@ -1,0 +1,26 @@
+# ---- 构建产物 ----
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+
+# ---- 本地敏感配置：数据库口令等，切勿提交 ----
+local-secrets.yml
+.env
+
+# ---- 日志 ----
+logs/
+*.log
+
+# ---- IDE ----
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db

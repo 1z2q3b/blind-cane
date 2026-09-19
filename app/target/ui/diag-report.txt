@@ -1,0 +1,29 @@
+===== 语义树节点 =====
+flt-announcement-host role=- size=0x0 aria-label="" text=""
+flt-announcement-polite role=- size=1x1 aria-label="" text=""
+flt-announcement-assertive role=- size=1x1 aria-label="" text=""
+flt-glass-pane role=- size=0x0 aria-label="" text=""
+flt-scene-host role=- size=0x0 aria-label="" text=""
+flt-scene role=- size=0x0 aria-label="" text=""
+flt-canvas-container role=- size=0x0 aria-label="" text=""
+flt-text-editing-host role=- size=0x0 aria-label="" text=""
+flt-semantics-host role=- size=0x0 aria-label="" text="稍后处理一键求助张老先生触发时间 12:53:22老人按下手杖 SOS 按键立即拨打 120我已确认，标记已处理这是误报提示：当前通话号码为 120（急救）。二"
+flt-semantics role=- size=430x932 aria-label="" text="稍后处理一键求助张老先生触发时间 12:53:22老人按下手杖 SOS 按键立即拨打 120我已确认，标记已处理这是误报提示：当前通话号码为 120（急救）。二"
+flt-semantics role=- size=430x932 aria-label="" text="稍后处理一键求助张老先生触发时间 12:53:22老人按下手杖 SOS 按键立即拨打 120我已确认，标记已处理这是误报提示：当前通话号码为 120（急救）。二"
+flt-semantics role=- size=430x932 aria-label="" text="稍后处理一键求助张老先生触发时间 12:53:22老人按下手杖 SOS 按键立即拨打 120我已确认，标记已处理这是误报提示：当前通话号码为 120（急救）。二"
+flt-semantics role=group size=430x932 aria-label="" text="稍后处理一键求助张老先生触发时间 12:53:22老人按下手杖 SOS 按键立即拨打 120我已确认，标记已处理这是误报提示：当前通话号码为 120（急救）。二"
+flt-semantics role=button size=118x44 aria-label="" text="稍后处理"
+flt-semantics role=- size=390x44 aria-label="" text="一键求助"
+flt-semantics role=- size=390x37 aria-label="" text="张老先生"
+flt-semantics role=- size=390x24 aria-label="" text="触发时间 12:53:22"
+flt-semantics role=- size=390x23 aria-label="" text="老人按下手杖 SOS 按键"
+flt-semantics role=button size=390x54 aria-label="" text="立即拨打 120"
+flt-semantics role=button size=390x48 aria-label="" text="我已确认，标记已处理"
+flt-semantics role=button size=390x44 aria-label="" text="这是误报"
+flt-semantics role=- size=390x39 aria-label="" text="提示：当前通话号码为 120（急救）。二期接入设备双向通话后，此处将改为直连导盲杖。"
+flt-semantics role=- size=390x21 aria-label="" text=""
+
+===== 浏览器控制台 =====
+[debug] Injecting <script> tag. Using callback.
+[debug] Injecting <script> tag. Using callback.
+[log] [WS] 已连接 ward=1
