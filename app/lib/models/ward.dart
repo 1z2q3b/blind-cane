@@ -8,6 +8,9 @@ class Ward {
     this.relation,
     this.birthYear,
     this.homeAddress,
+    this.homeLng,
+    this.homeLat,
+    this.contactPhone,
     this.myRole,
     this.device,
     this.latestLocation,
@@ -20,6 +23,13 @@ class Ward {
   final int? birthYear;
   final String? homeAddress;
 
+  /// 住址坐标（家属「手动定位」确认后写入）。两个都为 null 表示还没定位过。
+  final double? homeLng;
+  final double? homeLat;
+
+  /// 随身电话，一键拨号用。空串/ null 表示未填写。
+  final String? contactPhone;
+
   /// 1 = 主监护人，2 = 协作家属。
   final int? myRole;
   final DeviceInfo? device;
@@ -28,6 +38,13 @@ class Ward {
 
   bool get isPrimaryGuardian => myRole == 1;
 
+  /// 是否已有可拨打的号码（去空格后非空）。
+  bool get hasContactPhone =>
+      contactPhone != null && contactPhone!.trim().isNotEmpty;
+
+  /// 是否已完成手动定位。
+  bool get hasHomeLocation => homeLng != null && homeLat != null;
+
   factory Ward.fromJson(Map<String, dynamic> json) {
     return Ward(
       id: (json['id'] as num?)?.toInt() ?? 0,
@@ -35,6 +52,9 @@ class Ward {
       relation: json['relation'] as String?,
       birthYear: (json['birthYear'] as num?)?.toInt(),
       homeAddress: json['homeAddress'] as String?,
+      homeLng: (json['homeLng'] as num?)?.toDouble(),
+      homeLat: (json['homeLat'] as num?)?.toDouble(),
+      contactPhone: json['contactPhone'] as String?,
       myRole: (json['myRole'] as num?)?.toInt(),
       device: json['device'] == null
           ? null
@@ -66,6 +86,9 @@ class WardDetail extends Ward {
     super.relation,
     super.birthYear,
     super.homeAddress,
+    super.homeLng,
+    super.homeLat,
+    super.contactPhone,
     super.myRole,
     super.device,
     super.latestLocation,
@@ -88,6 +111,9 @@ class WardDetail extends Ward {
       relation: base.relation,
       birthYear: base.birthYear,
       homeAddress: base.homeAddress,
+      homeLng: base.homeLng,
+      homeLat: base.homeLat,
+      contactPhone: base.contactPhone,
       myRole: base.myRole,
       device: base.device,
       latestLocation: base.latestLocation,

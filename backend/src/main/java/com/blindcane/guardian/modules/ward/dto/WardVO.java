@@ -10,12 +10,16 @@ import com.blindcane.guardian.modules.location.dto.LatestLocation;
  * 那是详情页（且只有确认过监护权限后）才需要的数据。
  *
  * @param myRole           当前家属在该被监护人上的角色（1 主 / 2 副），前端据此决定是否显示「邀请家属」
+ * @param homeLng          住址经度（手动定位得到，可空）
+ * @param homeLat          住址纬度（可空）
+ * @param contactPhone     随身电话（一键拨号；空串表示未填）
  * @param device           绑定设备状态，未绑定为 null
  * @param latestLocation   最新位置（Redis 热数据），无上报为 null
  * @param pendingAlertCount 待处理告警数，用于首页红角标
  */
 public record WardVO(Long id, String name, String relation, Integer birthYear,
-                     String homeAddress, Integer myRole,
+                     String homeAddress, Double homeLng, Double homeLat, String contactPhone,
+                     Integer myRole,
                      DeviceVO device, LatestLocation latestLocation,
                      long pendingAlertCount) {
 }

@@ -56,9 +56,10 @@ blindcane:
     access-token-ttl-minutes: 120   # 2 小时
     refresh-token-ttl-days: 7       # 7 天
   sms:
-    # false = 走 Mock：验证码固定 123456，并打印到日志（提示词 9.1）
+    # false = 走 Mock：验证码由后端随机生成（6 位），打印到日志且响应体回显 mockCode。
+    # 注意：不再提供「固定验证码」——固定码会让发送间隔/每日上限/一次性消费形同虚设，
+    # 演示时取码方式：看后端日志【Mock 短信】一行，或直接用 /auth/sms/send 响应里的 mockCode
     enabled: ${SMS_ENABLED:false}
-    mock-code: "123456"
     interval-seconds: 60            # 同一手机号发码间隔
     code-ttl-seconds: 300           # 验证码有效期 5 分钟
     max-per-day: 10                 # 单手机号每日上限
@@ -89,11 +90,22 @@ blindcane:
     initial-battery: 85
     battery-decay-cron: "0 0 * * * *"   # 每小时整点电量 -1%
     fall-confirm-timeout-seconds: 30    # 疑似跌倒自动升级为正式告警的等待时长
+    # 演示设备的「虚拟蓝牙地址」。真实硬件地址由 ESP32 决定，
+    # 这里给一个固定值是为了在没有任何蓝牙硬件的情况下也能跑通
+    # 「绑定 → 连接 → 遥测 → 命令」全链路（见 MockBleController）
+    demo-ble-address: "D0:CF:13:8A:00:01"
   device:
     offline-threshold-minutes: 5    # 超过该时长未上报判定离线（提示词 4.4）
     offline-scan-interval-ms: 60000 # 离线扫描周期 60 秒
     low-battery-threshold: 20       # 低于该电量产生 LOW_BATTERY 告警
     low-battery-step: 10            # 电量阶梯去重粒度：每跌 10% 才再告警
+    # ------- 以下为 BLE 接入参数（《BLE 对接规格 v1》）-------
+    # 遥测节流窗口：手杖 500ms 一帧，靠这个窗口把稳态落库压到 ≤1 次/秒；
+    # 状态变化不受窗口限制，危险状态仍然零延迟可见
+    telemetry-min-interval-ms: 1000
+    # 障碍状态阈值，与规格第 3 节一致：≥100cm 畅通 / 20~100cm 有障碍 / <20cm 危险
+    obstacle-near-cm: 100
+    obstacle-danger-cm: 20
   location:
     flush-batch-size: 200           # 批量落库阈值：满 200 条立即写
     flush-interval-ms: 5000         # 或每 5 秒写一次

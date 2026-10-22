@@ -8,7 +8,8 @@ import org.springframework.stereotype.Service;
  * Mock 短信发送器：只打日志，不真的发短信。
  *
  * <p>默认启用（{@code blindcane.sms.enabled=false} 或未配置时）。
- * 演示时验证码可在后端日志里直接看到，同时 /auth/sms/send 的响应也会回带。
+ * 验证码由 {@code AuthServiceImpl} 随机生成后传入这里，打印到控制台；
+ * 同时 {@code /auth/sms/send} 的响应体也会回显该码，双通道取码。
  */
 @Slf4j
 @Service

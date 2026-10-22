@@ -78,6 +78,10 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: scheme,
       typography: scaledTypography,
+      // 默认字体族指向随包分发的思源黑体。
+      // 不设置的后果：CanvasKit 渲染汉字时会去 fonts.gstatic.com 现拉字体，
+      // 网络一抖动中文就全变豆腐块（页面看着像"没有内容"）。
+      fontFamily: 'NotoSansSC',
     );
 
     return base.copyWith(
@@ -100,16 +104,24 @@ class AppTheme {
           color: scheme.onSurface,
         ),
       ),
+      // ⚠️ 这里**不能**用 Size.fromHeight(minTouchSize)：
+      // Size.fromHeight 的宽度是 double.infinity，按钮一旦成为 Row /
+      // Wrap 里的非弹性子节点，就会被布局成无限宽——把同排的 Expanded
+      // 挤成 0 宽（文字一字一行），按钮自己也画不出来（无限大的渲染盒
+      // 什么都画不出）。这就是「添加家人」页位置卡片竖排、手动定位按钮
+      // 消失的根因。宽度留给 0，需要全宽的 CTA 在调用处包
+      // SizedBox(width: double.infinity)。
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size.fromHeight(minTouchSize),
+          minimumSize: const Size(0, minTouchSize),
           textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size.fromHeight(minTouchSize),
+          // 同 filledButtonTheme：宽度不能给 ∞（Size.fromHeight 的坑）
+          minimumSize: const Size(0, minTouchSize),
           textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),

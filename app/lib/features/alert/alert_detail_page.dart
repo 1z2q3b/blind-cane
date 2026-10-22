@@ -8,7 +8,8 @@ import '../../core/theme/app_theme.dart';
 import '../../models/alert.dart';
 import '../../state/alert_state.dart';
 import '../../state/providers.dart';
-import '../location/location_map_canvas.dart';
+import '../../state/ward_state.dart';
+import '../../core/map/smart_map_view.dart';
 import '../shared/widgets.dart';
 
 /// 告警详情与处理（提示词 5.6）。
@@ -147,6 +148,7 @@ class _AlertDetailPageState extends ConsumerState<AlertDetailPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final alert = _alert;
+    final wardPhone = alert == null ? null : _wardPhone(ref, alert);
 
     return Scaffold(
       appBar: AppBar(title: const Text('告警详情')),
@@ -166,7 +168,7 @@ class _AlertDetailPageState extends ConsumerState<AlertDetailPage> {
                             height: 180,
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(16),
-                              child: LocationMapCanvas(
+                              child: SmartMapView(
                                 lng: alert.lng,
                                 lat: alert.lat,
                                 // 告警只存坐标不存精度，给一个合理的默认值，
@@ -181,26 +183,54 @@ class _AlertDetailPageState extends ConsumerState<AlertDetailPage> {
                         _DetailRows(alert: alert),
                         const SizedBox(height: 24),
                         if (alert.isPending) ...[
-                          FilledButton.icon(
-                            onPressed:
-                                _submitting ? null : () => _handle('RESOLVED'),
-                            icon: const Icon(Icons.check_circle_outline),
-                            label: const Text('标记为已处理'),
+                          // 全宽 CTA：主题 minimumSize 宽度为 0，全宽靠 SizedBox 撑
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: _submitting
+                                  ? null
+                                  : () => _handle('RESOLVED'),
+                              icon: const Icon(Icons.check_circle_outline),
+                              label: const Text('标记为已处理'),
+                            ),
                           ),
                           const SizedBox(height: 12),
-                          OutlinedButton.icon(
-                            onPressed:
-                                _submitting ? null : () => _handle('FALSE_ALARM'),
-                            icon: const Icon(Icons.report_gmailerrorred_outlined),
-                            label: const Text('标记为误报'),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: _submitting
+                                  ? null
+                                  : () => _handle('FALSE_ALARM'),
+                              icon:
+                                  const Icon(Icons.report_gmailerrorred_outlined),
+                              label: const Text('标记为误报'),
+                            ),
                           ),
                           const SizedBox(height: 12),
                         ],
-                        OutlinedButton.icon(
-                          onPressed: () => _call(_phoneOf(alert)),
-                          icon: const Icon(Icons.call),
-                          label: Text('拨打 ${_phoneOf(alert)}'),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => _call(wardPhone ?? emergencyNumber),
+                            icon: Icon(wardPhone == null
+                                ? Icons.emergency_outlined
+                                : Icons.call),
+                            label: Text(wardPhone == null
+                                ? '拨打 $emergencyNumber（尚未填写随身电话）'
+                                : '拨打随身电话 $wardPhone'),
+                          ),
                         ),
+                        if (wardPhone == null) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            '在「家人档案」里填写随身电话后，这里会直接拨打老人本人，'
+                            '而不是绕到急救号码。',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         Text(
                           alert.isPending
@@ -216,11 +246,28 @@ class _AlertDetailPageState extends ConsumerState<AlertDetailPage> {
     );
   }
 
-  /// 紧急电话：先打 120，其余情况打主监护人。
+  /// 兜底急救号码。只在档案里没填随身电话时才用它。
+  static const String emergencyNumber = '120';
+
+  /// 取该告警所属被监护人的随身电话。
   ///
-  /// 真实产品应优先拨打被监护人本人（若设备支持通话），
-  /// MVP 阶段设备是概念机，先给急救号码兜底。
-  String _phoneOf(AlertRecord alert) => '120';
+  /// 数据源用围栏列表同款的 wardListProvider 快照（WardVO 现在带 contactPhone），
+  /// 不再单独请求详情：告警详情页打开频率高，多一次往返会让"急着打电话"的
+  /// 场景多等一个 RTT。
+  String? _wardPhone(WidgetRef ref, AlertRecord alert) {
+    final wards = ref.watch(wardListProvider).asData?.value;
+    if (wards == null) {
+      return null;
+    }
+    for (final ward in wards) {
+      if (ward.id != alert.wardId) {
+        continue;
+      }
+      final phone = ward.contactPhone?.trim();
+      return (phone == null || phone.isEmpty) ? null : phone;
+    }
+    return null;
+  }
 }
 
 class _Header extends StatelessWidget {

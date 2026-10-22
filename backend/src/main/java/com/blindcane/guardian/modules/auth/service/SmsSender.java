@@ -3,8 +3,10 @@ package com.blindcane.guardian.modules.auth.service;
 /**
  * 短信发送抽象（可插拔）。
  *
- * <p>当前只提供 Mock 实现：{@code blindcane.sms.enabled=false} 时验证码固定 123456
- * 并打印日志，保证无第三方密钥也能跑通登录闭环（提示词 9.1）。
+ * <p>当前只提供 Mock 实现：{@code blindcane.sms.enabled=false} 时验证码由
+ * {@code AuthServiceImpl} 随机生成，经本接口打印到日志，保证无第三方密钥
+ * 也能跑通登录闭环（提示词 9.1）。真实短信模式下验证码同样由后端生成，
+ * 只是改由真实通道下发，响应体不再回显。
  *
  * <p>接入真实短信的方式：新增一个实现类并标注
  * {@code @ConditionalOnProperty(name = "blindcane.sms.enabled", havingValue = "true")}，

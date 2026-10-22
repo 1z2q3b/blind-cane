@@ -34,6 +34,11 @@ public enum ErrorCode {
     PHONE_FORMAT_ERROR(101007, "手机号格式不正确"),
     SMS_DAILY_LIMIT(101008, "今日验证码发送次数已达上限"),
     SMS_SERVICE_UNAVAILABLE(101009, "验证码服务暂时不可用，请稍后再试"),
+    PHONE_ALREADY_REGISTERED(101010, "该手机号已注册，请直接登录"),
+    ACCOUNT_NOT_FOUND(101011, "账号不存在，请先注册"),
+    PASSWORD_ERROR(101012, "手机号或密码错误"),
+    PASSWORD_NOT_SET(101013, "该账号未设置密码，请使用验证码登录"),
+    LOGIN_METHOD_REQUIRED(101014, "请选择验证码登录或密码登录"),
 
     // ---------- 103xxx 被监护人 / 监护关系 ----------
     NO_GUARDIAN_PERMISSION(103001, "无监护权限"),
@@ -47,6 +52,12 @@ public enum ErrorCode {
     DEVICE_NOT_FOUND(104003, "设备不存在"),
     DEVICE_NOT_BOUND(104004, "该设备尚未绑定被监护人"),
     DEVICE_WARD_OCCUPIED(104005, "该被监护人已绑定其他设备，请先解绑"),
+    /** BLE：蓝牙地址被另一台仍在绑定的设备占用（尽力而为的冲突检测，见 BleAddressRequest 说明）。 */
+    DEVICE_BLE_ADDRESS_OCCUPIED(104006, "该手杖已绑定到其他被监护人，请先解绑"),
+    /** BLE：命令不在白名单内（如固件未实现的预留命令）。 */
+    DEVICE_COMMAND_UNSUPPORTED(104007, "不支持的命令"),
+    /** BLE：遥测报文既没有可用状态也没有距离，无法判断。 */
+    DEVICE_TELEMETRY_INVALID(104008, "上报数据不完整：状态与距离至少需要其一"),
 
     // ---------- 106xxx 告警 ----------
     ALERT_NOT_FOUND(106001, "告警记录不存在"),

@@ -10,7 +10,8 @@ import '../../core/theme/app_theme.dart';
 import '../../models/alert.dart';
 import '../../state/alert_state.dart';
 import '../../state/providers.dart';
-import '../location/location_map_canvas.dart';
+import '../../state/ward_state.dart';
+import '../../core/map/smart_map_view.dart';
 
 /// 全屏强提醒页（提示词 5.8）。
 ///
@@ -85,6 +86,26 @@ class _FullScreenAlertPageState extends ConsumerState<FullScreenAlertPage> {
         backgroundColor: Theme.of(context).colorScheme.error,
       ));
     }
+  }
+
+  /// 紧急拨打目标：优先被监护人随身电话，没填才退回急救号码。
+  ///
+  /// 全屏告警是"最急的那一下"，拨错对象的代价很高——直接打给老人本人
+  /// 才能第一时间确认他是否清醒、是否需要叫救护车。
+  String _callTarget() {
+    final wards = ref.watch(wardListProvider).asData?.value;
+    if (wards != null) {
+      for (final ward in wards) {
+        if (ward.id != _alert.wardId) {
+          continue;
+        }
+        final phone = ward.contactPhone?.trim();
+        if (phone != null && phone.isNotEmpty) {
+          return phone;
+        }
+      }
+    }
+    return AppConfig.emergencyNumber;
   }
 
   Future<void> _call(String number) async {
@@ -210,7 +231,7 @@ class _FullScreenAlertPageState extends ConsumerState<FullScreenAlertPage> {
                           child: Column(
                             children: [
                               Expanded(
-                                child: LocationMapCanvas(
+                                child: SmartMapView(
                                   lng: _alert.lng,
                                   lat: _alert.lat,
                                   accuracyM: 25,
@@ -253,39 +274,51 @@ class _FullScreenAlertPageState extends ConsumerState<FullScreenAlertPage> {
                         ),
                       ],
                       const SizedBox(height: 24),
-                      FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: AppTheme.critical,
-                          minimumSize: const Size.fromHeight(62),
-                          textStyle: const TextStyle(
-                              fontSize: 21, fontWeight: FontWeight.w700),
+                      // 这三个按钮要全宽：父级 Column 不是 stretch，
+                      // 用 SizedBox 撑满（主题 minimumSize 宽度已改为 0，
+                      // 不能再靠 Size.fromHeight 的 ∞ 宽）。
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: AppTheme.critical,
+                            minimumSize: const Size(0, 62),
+                            textStyle: const TextStyle(
+                                fontSize: 21, fontWeight: FontWeight.w700),
+                          ),
+                          onPressed: () => _call(_callTarget()),
+                          icon: const Icon(Icons.call, size: 26),
+                          label: Text('立即拨打 ${_callTarget()}'),
                         ),
-                        onPressed: () => _call(AppConfig.emergencyNumber),
-                        icon: const Icon(Icons.call, size: 26),
-                        label: Text('立即拨打 ${AppConfig.emergencyNumber}'),
                       ),
                       const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: const BorderSide(color: Colors.white, width: 1.6),
-                          minimumSize: const Size.fromHeight(56),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white, width: 1.6),
+                            minimumSize: const Size(0, 56),
+                          ),
+                          onPressed: () => _handle('RESOLVED'),
+                          icon: const Icon(Icons.check_circle_outline, size: 24),
+                          label: const Text('我已确认，标记已处理',
+                              style: TextStyle(fontSize: 18)),
                         ),
-                        onPressed: () => _handle('RESOLVED'),
-                        icon: const Icon(Icons.check_circle_outline, size: 24),
-                        label: const Text('我已确认，标记已处理',
-                            style: TextStyle(fontSize: 18)),
                       ),
                       const SizedBox(height: 12),
-                      TextButton(
-                        onPressed:
-                            _submitting ? null : () => _handle('FALSE_ALARM'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.white.withValues(alpha: 0.9),
-                          minimumSize: const Size.fromHeight(52),
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton(
+                          onPressed:
+                              _submitting ? null : () => _handle('FALSE_ALARM'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white.withValues(alpha: 0.9),
+                            minimumSize: const Size(0, 52),
+                          ),
+                          child: const Text('这是误报', style: TextStyle(fontSize: 17)),
                         ),
-                        child: const Text('这是误报', style: TextStyle(fontSize: 17)),
                       ),
                       const SizedBox(height: 8),
                       Text(

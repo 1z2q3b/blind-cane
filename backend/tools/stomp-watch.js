@@ -3,7 +3,7 @@
  * STOMP 订阅观察工具（联调 / 验收用）
  *
  * 用途：验证后端 WebSocket 推送链路是否正常 —— 登录后订阅
- * /topic/ward/{wardId}/location、/alert、/device 三个主题，
+ * /topic/ward/{wardId}/location、/alert、/device、/command 四个主题，
  * 把收到的消息实时打印出来，同时把订阅被拒的 ERROR 帧也打印出来。
  *
  * 依赖：ws（本地联调工具依赖，不属于后端运行时依赖）
@@ -48,6 +48,9 @@ const TOPICS = [
   `/topic/ward/${wardId}/location`,
   `/topic/ward/${wardId}/alert`,
   `/topic/ward/${wardId}/device`,
+  // 手杖命令下行主题：后端不直接连蓝牙，命令在这里广播出去，
+  // 由真正持有 BLE 链路的那台手机写入手杖 RX 特征
+  `/topic/ward/${wardId}/command`,
 ];
 
 // ---------- STOMP 帧编解码 ----------

@@ -73,7 +73,7 @@ public class MockMaintenanceController {
     }
 
     @Operation(summary = "把演示设备恢复为可演示状态",
-            description = "电量回满、恢复在线，用于两次演示之间快速复位（不清位置与告警历史）")
+            description = "电量回满、恢复在线，并清空蓝牙运行时状态，用于两次演示之间快速复位（不清位置与告警历史）")
     @PostMapping("/devices/{sn}/reset")
     public ApiResponse<String> resetDevice(@PathVariable("sn") String sn) {
         if (!properties.getSimulator().isEnabled()) {
@@ -85,11 +85,15 @@ public class MockMaintenanceController {
             throw BizException.of(ErrorCode.DEVICE_SN_NOT_FOUND, "模拟设备 " + sn + " 不存在");
         }
         int initialBattery = properties.getSimulator().getInitialBattery();
+        // 先清 BLE 运行态再走真实上报入口，这样复位后是干净的「未连接」：
+        // 残留的 obstacle_status=DANGER 会让下一场演示一开场就顶着红色「危险」
+        deviceService.clearBleState(device.getId());
         // 走真实上报入口：顺带复位离线去抖标记、刷新在线状态并推送一次设备状态
         deviceService.recordReport(device.getId(), initialBattery, 4, LocalDateTime.now());
         log.info("【Mock】演示设备已复位: sn={}, deviceId={}, 电量={}%",
                 sn, device.getId(), initialBattery);
-        return ApiResponse.success("演示设备 " + sn + " 已复位（电量 " + initialBattery + "%、已恢复在线）");
+        return ApiResponse.success("演示设备 " + sn + " 已复位（电量 " + initialBattery
+                + "%、已恢复在线、蓝牙运行时状态已清空）");
     }
 
     /** Redis 的 KEYS 在生产是禁忌，但本接口只在演示 profile 下存在，且 key 空间很小。 */

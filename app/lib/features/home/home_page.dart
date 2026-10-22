@@ -2,15 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/ble/ble_protocol.dart';
 import '../../core/config/app_config.dart';
+import '../../core/map/smart_map_view.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/device_info.dart';
 import '../../models/ward.dart';
 import '../../state/alert_state.dart';
+import '../../state/cane_state.dart';
 import '../../state/location_state.dart';
 import '../../state/providers.dart';
 import '../../state/ward_state.dart';
-import '../location/location_map_canvas.dart';
 import '../shared/ward_switcher.dart';
 import '../shared/widgets.dart';
 import 'main_shell.dart';
@@ -299,7 +301,7 @@ class _LocationCard extends StatelessWidget {
             child: Stack(
               children: [
                 Positioned.fill(
-                  child: LocationMapCanvas(
+                  child: SmartMapView(
                     lng: latest.lng,
                     lat: latest.lat,
                     accuracyM: latest.accuracyM,
@@ -443,6 +445,10 @@ class _QuickActions extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final session = ref.watch(caneSessionProvider);
+    final device = ref.watch(caneTargetDeviceProvider);
+
     return Card(
       child: Column(
         children: [
@@ -455,11 +461,39 @@ class _QuickActions extends ConsumerWidget {
           ),
           const Divider(height: 1),
           ListTile(
+            leading: const Icon(Icons.fence_outlined),
+            title: const Text('电子围栏'),
+            subtitle: const Text('走出安全区、进入危险区时提醒'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/geofence'),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.route_outlined),
+            title: const Text('轨迹回放'),
+            subtitle: const Text('按日期回看家人走过的路线'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/track'),
+          ),
+          const Divider(height: 1),
+          ListTile(
             leading: const Icon(Icons.notifications_none),
             title: const Text('告警中心'),
             subtitle: const Text('查看历史告警与处理记录'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => ref.read(mainTabProvider.notifier).select(1),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: Icon(
+              _caneIcon(session),
+              color: _caneColor(session, device, theme),
+            ),
+            title: const Text('手杖连接与实时避障'),
+            // 副标题直接给结论（多少厘米 / 什么状态），家属不必点进去才知道
+            subtitle: Text(_caneSubtitle(session, device)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/cane'),
           ),
           const Divider(height: 1),
           ListTile(
@@ -474,6 +508,57 @@ class _QuickActions extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  // ---- 手杖条目：图标/颜色/副标题 ----
+  //
+  // 数据源优先级和「手杖连接」页保持一致：本机链路 > 云端快照。
+  // 本机断链时云端那份只是"最后一次读数"，必须明说是过期值，
+  // 否则家属会以为 80cm 是当前的，而手杖其实早就没在报了。
+
+  static IconData _caneIcon(CaneSessionState session) {
+    if (session.connected) {
+      return Icons.bluetooth_connected;
+    }
+    if (session.connecting || session.scanning) {
+      return Icons.bluetooth_searching;
+    }
+    return Icons.bluetooth_disabled;
+  }
+
+  static Color _caneColor(
+    CaneSessionState session,
+    DeviceInfo? device,
+    ThemeData theme,
+  ) {
+    if (!session.connected) {
+      return theme.colorScheme.outline;
+    }
+    final status = session.latest?.status ?? device?.obstacle;
+    return switch (status) {
+      ObstacleStatus.danger => AppTheme.critical,
+      ObstacleStatus.near => AppTheme.warning,
+      ObstacleStatus.clear => AppTheme.healthy,
+      null => theme.colorScheme.primary,
+    };
+  }
+
+  static String _caneSubtitle(CaneSessionState session, DeviceInfo? device) {
+    if (device == null) {
+      return '尚未绑定导盲杖';
+    }
+    if (!session.connected) {
+      return device.bleConnected
+          ? '链路由其他家属端持有'
+          : '未连接 · 点此扫描并连接手杖';
+    }
+    final frame = session.latest;
+    if (frame == null) {
+      return '链路已建立，等待手杖推送数据…（已收 ${session.frameCount} 帧）';
+    }
+    final distance = frame.distanceCm;
+    final value = distance == null ? '--' : '$distance';
+    return '前方 $value cm · ${frame.status.label}（实时）';
   }
 }
 

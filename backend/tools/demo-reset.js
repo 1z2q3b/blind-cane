@@ -21,7 +21,7 @@ const PORT = process.env.PORT || '8001';
 const API_URL = process.env.API_URL || `http://127.0.0.1:${PORT}`;
 
 const PHONE = '13800138000';
-const SMS_CODE = '123456';
+// 验证码不再固定：由后端随机生成，Mock 模式下 /auth/sms/send 响应回显，取来即用
 const SN = 'BC-2024-DEMO01';
 const WARD_ID = 1;
 
@@ -55,9 +55,9 @@ async function main() {
   console.log(`   ${device}`);
 
   console.log('3. 登录演示账号');
-  await api('/api/v1/auth/sms/send', { body: { phone: PHONE } });
+  const smsSent = await api('/api/v1/auth/sms/send', { body: { phone: PHONE } });
   const login = await api('/api/v1/auth/login', {
-    body: { phone: PHONE, smsCode: SMS_CODE },
+    body: { phone: PHONE, smsCode: smsSent.mockCode },
   });
   const token = login.accessToken;
   console.log(`   已登录：${login.userInfo.nickname}`);

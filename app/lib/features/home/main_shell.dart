@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/ws/ws_client.dart';
 import '../../state/alert_state.dart';
+import '../../state/cane_state.dart';
 import '../../state/ws_bridge.dart';
 import '../alert/alert_list_page.dart';
 import '../settings/settings_page.dart';
@@ -36,8 +37,14 @@ class MainShell extends ConsumerWidget {
     // 在这里激活推送桥：MainShell 是登录后所有页面的共同祖先，
     // 它活着桥就活着，保证在任何二级页面都能收到告警
     ref.watch(wsBridgeProvider);
+    // 手杖会话同样必须挂在共同祖先上，不能只在「手杖连接」页里 watch：
+    // 命令是走云端广播下来的，如果用户已经切回首页，而 session 那时才被销毁，
+    // 订阅就断了 —— 家属点了静音、提示"已下发"，手杖却永远不会动。
+    // 挂在这里还能保证 30 秒心跳持续上报，设备不会被云端判离线。
+    ref.watch(caneSessionProvider);
     final index = ref.watch(mainTabProvider);
-    final pending = ref.watch(pendingCountProvider).value?.total ?? 0;
+    // 用 asData：value 在 error 态会 rethrow，MainShell 一旦崩掉整个 App 都是空白页
+    final pending = ref.watch(pendingCountProvider).asData?.value.total ?? 0;
 
     return Scaffold(
       body: IndexedStack(

@@ -34,7 +34,7 @@ const CHROME_CANDIDATES = [
 ];
 
 const PHONE = '13800138000';
-const SMS_CODE = '123456';
+// 验证码由后端随机生成（不再固定），Mock 模式下从 /auth/sms/send 响应里取
 const SN = 'BC-2024-DEMO01';
 const WARD_ID = 1;
 
@@ -94,6 +94,28 @@ const COLLECT_NODES = () => {
       if (value) {
         out.push({ text: value, w: Math.round(r.width), h: Math.round(r.height) });
       }
+    });
+    root.querySelectorAll('*').forEach((el) => {
+      if (el.shadowRoot) walk(el.shadowRoot);
+    });
+  };
+  walk(document);
+  return out;
+};
+
+/**
+ * 收集页面上所有 <input> 的 aria-label（含 shadow root）。
+ *
+ * 为什么不能只靠 flt-semantics 节点的文本：Flutter web 把 TextField 的
+ * labelText 放在内部 <input> 的 aria-label 上，flt-semantics 元素本身
+ * 反而是空节点。历史上这条断言靠「页脚文案含手机号 + 按钮文案含验证码」
+ * 蒙对过，但那测的不是输入框——2026-10-21 登录页改版后修正为直接查 input。
+ */
+const INPUT_ARIA_LABELS = () => {
+  const out = [];
+  const walk = (root) => {
+    root.querySelectorAll('input').forEach((el) => {
+      out.push((el.getAttribute('aria-label') || '').trim());
     });
     root.querySelectorAll('*').forEach((el) => {
       if (el.shadowRoot) walk(el.shadowRoot);
@@ -191,9 +213,9 @@ async function main() {
 
   console.log('== 1. 取一对真令牌（走真实登录接口） ==');
   await api(`/api/v1/mock/sms/reset?phone=${PHONE}`);
-  await api('/api/v1/auth/sms/send', { body: { phone: PHONE } });
+  const sms = await api('/api/v1/auth/sms/send', { body: { phone: PHONE } });
   const login = await api('/api/v1/auth/login',
-    { body: { phone: PHONE, smsCode: SMS_CODE } });
+    { body: { phone: PHONE, smsCode: sms.mockCode } });
   check('登录拿到 accessToken', !!login.accessToken, `user=${login.userInfo.nickname}`);
 
   // 演示数据复位：留一堆历史待处理告警会让首页角标难看，也让断言失去确定性
@@ -249,8 +271,12 @@ async function main() {
 
     check('Flutter 首帧渲染成功', loginNodes.length > 0,
       `语义树节点 ${loginNodes.length} 个`);
+    // 输入框的标签在 <input> 的 aria-label 上（Flutter web 的实现方式），
+    // 直接查 input 才是真的在测「登录页有手机号和验证码输入框」
+    const inputLabels = await page.evaluate(INPUT_ARIA_LABELS);
     check('登录页出现手机号与验证码输入框',
-      loginText.includes('手机号') && loginText.includes('验证码'));
+      inputLabels.includes('手机号') && inputLabels.includes('验证码'),
+      `input aria-label: ${inputLabels.filter(Boolean).join(' / ') || '(无)'}`);
     check('登录页未把用户误判为已登录（路由重定向正确）',
       !loginText.includes('实时位置') && !loginText.includes('快捷操作'));
 
@@ -377,10 +403,18 @@ async function main() {
     };
     const beforeNodes = await page.evaluate(COLLECT_NODES);
     const beforeLoc = coordOf(beforeNodes);
-    await sleep(12000);
-    const afterNodes = await page.evaluate(COLLECT_NODES);
-    const afterLoc = coordOf(afterNodes);
-    check('位置在 12 秒内发生变化（实时链路在工作）',
+    // 轮询直到屏幕坐标变化，而不是死等一个 12 秒窗口：模拟器是 ~1m/步的
+    // 随机游走且带「静止」态，某个 12 秒窗口的净位移可能不足半个显示精度，
+    // 固定窗口会偶发误报（2026-10-21 实测过一次）。通过标准不变——
+    // 屏幕上的坐标必须真的变过，30 秒内不变才算链路故障
+    let afterLoc = null;
+    const locDeadline = Date.now() + 30000;
+    while (Date.now() < locDeadline) {
+      await sleep(2000);
+      afterLoc = coordOf(await page.evaluate(COLLECT_NODES));
+      if (afterLoc && afterLoc !== beforeLoc) break;
+    }
+    check('位置在 30 秒内发生变化（实时链路在工作）',
       !!beforeLoc && !!afterLoc && beforeLoc !== afterLoc,
       beforeLoc
         ? `${beforeLoc} -> ${afterLoc || '未读到'}`

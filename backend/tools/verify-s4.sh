@@ -11,8 +11,10 @@ set -u
 PORT="${PORT:-8001}"
 BASE="http://127.0.0.1:$PORT"
 MYSQL="/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql"
-REDIS="/d/redis/redis-cli"
-NODE="C:/Users/Lenovo/.workbuddy/binaries/node/versions/22.22.2-2/node.exe"
+# 本机 Redis 带 requirepass 且后端固定用 1 号库（见 application-dev.yml）。
+# 注意调用处不能加引号：变量里带参数，加了引号会被当成一个命令名
+REDIS="/d/redis/redis-cli -a 123456 -n 1"
+NODE="C:/Users/Lenovo/.workbuddy/binaries/node/versions/22.22.2-6/node.exe"
 export NODE_PATH="C:/Users/Lenovo/.workbuddy/binaries/node/workspace/node_modules"
 
 DB="blind_cane_guardian"
@@ -46,20 +48,22 @@ echo "== 0. 登录（$PHONE） =="
 # 先清掉短信限流：开发期同一号码一天会登录很多次，否则会撞上「每日上限」业务规则
 curl -s --noproxy '*' -X POST "$BASE/api/v1/mock/sms/reset?phone=$PHONE" > /dev/null
 curl -s --noproxy '*' -X POST "$BASE/api/v1/auth/sms/send" -H "Content-Type: application/json" \
-  -d "{\"phone\":\"$PHONE\"}" > /dev/null
+  -d "{\"phone\":\"$PHONE\"}" > "$TMP/sms.json"
+# 验证码由后端随机生成，Mock 模式下从发送响应里取（不再有固定码）
+SMS_CODE=$(cat "$TMP/sms.json" | "$NODE" "$WINROOT/tools/json-get.js" data.mockCode)
 curl -s --noproxy '*' -X POST "$BASE/api/v1/auth/login" -H "Content-Type: application/json" \
-  -d "{\"phone\":\"$PHONE\",\"smsCode\":\"123456\"}" > "$TMP/login.json"
+  -d "{\"phone\":\"$PHONE\",\"smsCode\":\"$SMS_CODE\"}" > "$TMP/login.json"
 TOKEN=$(cat "$TMP/login.json" | "$NODE" "$WINROOT/tools/json-get.js" data.accessToken)
 if [ -n "$TOKEN" ]; then pass "登录成功"; else fail "登录失败: $(cat "$TMP/login.json")"; exit 1; fi
 
 echo "== 1. 位置随机游走（10 秒/次） =="
 CNT0=$(q "SELECT COUNT(*) FROM $DB.location_record;")
-HOT0=$("$REDIS" GET "loc:ward:$WARD_ID" 2>/dev/null)
+HOT0=$($REDIS GET "loc:ward:$WARD_ID" 2>/dev/null)
 echo "  起始记录数=$CNT0"
 echo "  起始热数据=$HOT0"
 sleep 26
 CNT1=$(q "SELECT COUNT(*) FROM $DB.location_record;")
-HOT1=$("$REDIS" GET "loc:ward:$WARD_ID" 2>/dev/null)
+HOT1=$($REDIS GET "loc:ward:$WARD_ID" 2>/dev/null)
 echo "  26 秒后记录数=$CNT1（新增 $((CNT1 - CNT0))）"
 echo "  26 秒后热数据=$HOT1"
 if [ $((CNT1 - CNT0)) -ge 2 ]; then pass "随机游走持续产生位置上报"; else fail "未观察到位置漂移"; fi
@@ -76,7 +80,7 @@ echo "== 2. 电量衰减 + 低电量告警 =="
 # 清掉电量阶梯去重标记与历史低电量告警，让本次断言从干净状态开始
 q "DELETE FROM $DB.alert_record WHERE alert_type='LOW_BATTERY';"
 DEV_ID=$(q "SELECT id FROM $DB.device WHERE device_sn='$SN';")
-"$REDIS" DEL "alert:battery:notified:$DEV_ID" > /dev/null 2>&1
+$REDIS DEL "alert:battery:notified:$DEV_ID" > /dev/null 2>&1
 # 先把电量放到阈值 20 的上一格（21），让衰减一步就能触发 LOW_BATTERY
 BAT_SET=$(curl -s --noproxy '*' -X POST "$BASE/api/v1/mock/devices/$SN/battery?level=21")
 echo "  设置电量响应: $(echo "$BAT_SET" | head -c 120)"
@@ -149,7 +153,7 @@ echo
 echo "== 收尾：恢复演示数据（电量回满、清掉验证产生的告警） =="
 curl -s --noproxy '*' -X POST "$BASE/api/v1/mock/devices/$SN/battery?level=85" > /dev/null
 q "DELETE FROM $DB.alert_record WHERE alert_type IN ('SOS','FALL_DETECTED','LOW_BATTERY');"
-"$REDIS" DEL "alert:battery:notified:$DEV_ID" > /dev/null 2>&1
+$REDIS DEL "alert:battery:notified:$DEV_ID" > /dev/null 2>&1
 echo "  电量已恢复为 $(q "SELECT battery FROM $DB.device WHERE device_sn='$SN';")%"
 
 echo

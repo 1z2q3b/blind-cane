@@ -12,7 +12,8 @@ import java.time.LocalDateTime;
  * 因此这个 VO 只允许在监护权限校验通过之后构造。
  */
 public record WardDetailVO(Long id, String name, String relation, Integer birthYear,
-                           String homeAddress, String medicalNotes,
+                           String homeAddress, Double homeLng, Double homeLat, String contactPhone,
+                           String medicalNotes,
                            Long primaryUserId, Integer myRole,
                            DeviceVO device, LatestLocation latestLocation,
                            long pendingAlertCount, LocalDateTime createdAt) {

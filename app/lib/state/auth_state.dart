@@ -78,6 +78,8 @@ class AuthNotifier extends Notifier<AuthState> {
   TokenStore get _store => ref.read(tokenStoreProvider);
 
   /// 发送验证码。返回 Mock 验证码（生产模式下为 null）。
+  ///
+  /// 验证码由后端随机生成，Mock 模式下响应回显，页面据此自动填入。
   Future<String?> sendSmsCode(String phone) async {
     state = state.copyWith(loading: true, clearError: true);
     try {
@@ -90,21 +92,44 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
-  /// 登录（手机号不存在时后端会自动注册）。
-  Future<bool> login({required String phone, required String smsCode}) async {
+  /// 注册：手机号 + 密码 + 验证码。成功后直接进入已登录态。
+  Future<bool> register({
+    required String phone,
+    required String password,
+    required String smsCode,
+  }) async {
     state = state.copyWith(loading: true, clearError: true);
     try {
       final result = await ref
           .read(repositoryProvider)
-          .login(phone: phone, smsCode: smsCode);
-      await _store.saveSession(
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        userId: result.userInfo.id,
-        phone: result.userInfo.phone,
-        nickname: result.userInfo.nickname,
-      );
-      state = AuthState(loggedIn: true, user: result.userInfo);
+          .register(phone: phone, password: password, smsCode: smsCode);
+      await _persistSession(result);
+      return true;
+    } on ApiException catch (e) {
+      state = state.copyWith(loading: false, error: e.message);
+      return false;
+    } catch (e) {
+      state = state.copyWith(loading: false, error: '注册失败：$e');
+      return false;
+    }
+  }
+
+  /// 登录：验证码登录（传 [smsCode]）或密码登录（传 [password]），二选一。
+  ///
+  /// 注意：手机号不存在时后端**不再自动注册**（返回 101011），
+  /// 新用户需要走注册流程——这是为了和密码登录的账号语义保持一致
+  /// （没设过密码的号码不该能进系统）。
+  Future<bool> login({
+    required String phone,
+    String? smsCode,
+    String? password,
+  }) async {
+    state = state.copyWith(loading: true, clearError: true);
+    try {
+      final result = await ref
+          .read(repositoryProvider)
+          .login(phone: phone, smsCode: smsCode, password: password);
+      await _persistSession(result);
       return true;
     } on ApiException catch (e) {
       state = state.copyWith(loading: false, error: e.message);
@@ -113,6 +138,18 @@ class AuthNotifier extends Notifier<AuthState> {
       state = state.copyWith(loading: false, error: '登录失败：$e');
       return false;
     }
+  }
+
+  /// 登录/注册成功后落盘会话并切状态。
+  Future<void> _persistSession(LoginResult result) async {
+    await _store.saveSession(
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      userId: result.userInfo.id,
+      phone: result.userInfo.phone,
+      nickname: result.userInfo.nickname,
+    );
+    state = AuthState(loggedIn: true, user: result.userInfo);
   }
 
   /// 主动登出：先通知服务端拉黑令牌，再清本地。

@@ -5,7 +5,7 @@ import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../state/location_state.dart';
 import '../../state/ward_state.dart';
-import '../location/location_map_canvas.dart';
+import '../../core/map/smart_map_view.dart';
 import '../shared/widgets.dart';
 
 /// 实时位置页（提示词 5.4）。
@@ -48,7 +48,7 @@ class _LocationPageState extends ConsumerState<LocationPage> {
           : Stack(
               children: [
                 Positioned.fill(
-                  child: LocationMapCanvas(
+                  child: SmartMapView(
                     lng: latest.lng,
                     lat: latest.lat,
                     accuracyM: latest.accuracyM,

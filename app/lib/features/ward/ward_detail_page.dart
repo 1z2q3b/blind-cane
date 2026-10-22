@@ -20,6 +20,80 @@ class WardDetailPage extends ConsumerStatefulWidget {
 class _WardDetailPageState extends ConsumerState<WardDetailPage> {
   bool _busy = false;
 
+  /// 删除档案。二次确认之后才真正发请求。
+  ///
+  /// 这里没有回收站：轨迹、告警、围栏会随档案一起消失，
+  /// 所以确认框把"会失去什么"逐条写清楚，而不是只问一句"确定删除吗"。
+  Future<void> _deleteWard(String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除家人档案'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('确定删除「$name」吗？'),
+            const SizedBox(height: 12),
+            const Text(
+              '以下数据会被一并清除，且无法恢复：\n'
+              '· 全部位置轨迹\n'
+              '· 全部告警记录\n'
+              '· 全部电子围栏',
+              style: TextStyle(fontSize: 14, height: 1.6),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '已绑定的导盲杖会自动解绑，设备本身不会被删除，可以再绑定给其他人。',
+              style: TextStyle(fontSize: 14, height: 1.6),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('确认删除'),
+          ),
+        ],
+      ),
+    );
+
+    // 弹窗期间页面可能已被返回键关掉
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() => _busy = true);
+    final messenger = ScaffoldMessenger.of(context);
+    // 与绑定流程一样：错误色和 messenger 都要在 await 之前取好
+    final errorColor = Theme.of(context).colorScheme.error;
+    try {
+      await ref.read(wardListProvider.notifier).remove(widget.wardId);
+      messenger.showSnackBar(SnackBar(content: Text('已删除「$name」的档案')));
+      // 档案已经不存在了，这个页面没有继续停留的意义，直接退回列表
+      if (mounted) {
+        context.pop();
+      }
+    } on ApiException catch (e) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('删除失败：${e.message}'),
+        backgroundColor: errorColor,
+      ));
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
   Future<void> _bindDevice() async {
     final controller = TextEditingController(text: 'BC-2024-DEMO01');
     final sn = await showDialog<String>(
@@ -137,6 +211,8 @@ class _WardDetailPageState extends ConsumerState<WardDetailPage> {
   @override
   Widget build(BuildContext context) {
     final detail = ref.watch(wardDetailProvider(widget.wardId));
+    // asData 在 loading / error 态都返回 null，不像 value 那样会把异常重新抛出来
+    final loaded = detail.asData?.value;
 
     return Scaffold(
       appBar: AppBar(
@@ -150,6 +226,13 @@ class _WardDetailPageState extends ConsumerState<WardDetailPage> {
               ref.invalidate(wardDetailProvider(widget.wardId));
             },
           ),
+          // 只有主监护人能删：副监护人拿到的是一个点了必然 403 的按钮，不如不给。
+          if (loaded?.isPrimaryGuardian ?? false)
+            IconButton(
+              tooltip: '删除档案',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _busy ? null : () => _deleteWard(loaded!.name),
+            ),
         ],
       ),
       body: detail.when(
@@ -250,6 +333,22 @@ class _ProfileCard extends StatelessWidget {
               icon: Icons.home_outlined,
               label: '家庭住址',
               value: ward.homeAddress?.isNotEmpty == true ? ward.homeAddress! : '未填写',
+            ),
+            const SizedBox(height: 12),
+            // 坐标单独一行：文字住址和坐标是两回事，家属需要知道"到底定位没定位"。
+            // 没定位过就要在编辑页点「手动定位」补上，否则围栏默认中心兜不住。
+            _Row(
+              icon: ward.hasHomeLocation ? Icons.place : Icons.place_outlined,
+              label: '住址坐标',
+              value: ward.hasHomeLocation
+                  ? '${ward.homeLng!.toStringAsFixed(6)}, ${ward.homeLat!.toStringAsFixed(6)}'
+                  : '未定位（编辑档案可手动定位）',
+            ),
+            const SizedBox(height: 12),
+            _Row(
+              icon: Icons.phone_in_talk_outlined,
+              label: '随身电话',
+              value: ward.hasContactPhone ? ward.contactPhone! : '未填写',
             ),
             const SizedBox(height: 12),
             _Row(

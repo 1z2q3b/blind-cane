@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../core/ble/ble_protocol.dart';
 import '../../core/config/app_config.dart';
 import '../../core/storage/token_store.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/ws/ws_client.dart';
+import '../../models/device_info.dart';
 import '../../state/auth_state.dart';
+import '../../state/cane_state.dart';
 import '../../state/providers.dart';
 import '../../state/ward_state.dart';
 import '../../state/ws_bridge.dart';
@@ -80,6 +85,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final theme = Theme.of(context);
     final auth = ref.watch(authProvider);
     final wsStatus = ref.watch(wsStatusProvider);
+    // 蓝牙链路状态也要看：它和推送通道是两条独立的链路，
+    // 只看云端会漏掉「云上显示在线、但手机其实没连上手杖」这种情况
+    final session = ref.watch(caneSessionProvider);
+    final device = ref.watch(caneTargetDeviceProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('我的')),
@@ -187,6 +196,20 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     style: const TextStyle(fontSize: 14),
                   ),
                 ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                // 手杖蓝牙链路：和「实时推送通道」是两条独立链路 ——
+                // 云端断开时手杖可能还连着，反过来也成立。
+                // 所以这里单独列一行，而不是和上面的推送状态合并成一句"在线"。
+                ListTile(
+                  leading: Icon(
+                    _caneLinkIcon(session, device),
+                    color: _caneLinkColor(session, device, theme),
+                  ),
+                  title: const Text('手杖蓝牙链路'),
+                  subtitle: Text(_caneLinkText(session, device)),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/cane'),
+                ),
               ],
             ),
           ),
@@ -236,10 +259,22 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           Card(
             child: Column(
               children: [
+                // 和页面底部那段阶段说明保持同一口径：
+                // 围栏、轨迹回放、手动定位都已交付，这里不能再写「阶段一 MVP」，
+                // 否则同一屏上下两处自相矛盾。
                 const ListTile(
                   leading: Icon(Icons.info_outline),
                   title: Text('版本'),
-                  subtitle: Text('阶段一 MVP · 家属监护端'),
+                  subtitle: Text('阶段二 · 家属监护端'),
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  leading: const Icon(Icons.tag_outlined),
+                  title: const Text('构建标识'),
+                  // 排查「改了代码却没生效」时第一眼该看的地方：
+                  // 和交付方给的构建号对不上，就说明浏览器跑的还是旧包
+                  // （Flutter Web 的 Service Worker 会缓存整包）。
+                  subtitle: Text('${AppConfig.buildStamp}（对不上即为旧包，请硬刷新）'),
                 ),
                 const Divider(height: 1, indent: 16, endIndent: 16),
                 ListTile(
@@ -268,7 +303,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
           const SizedBox(height: 20),
           Text(
-            '导盲杖家属端 MVP\n第二阶段将接入：高德底图、设备双向通话、围栏与轨迹回放',
+            // 阶段口径必须和代码实际能力对齐：
+            // 围栏、轨迹回放、手动定位、BLE 链路都已交付，不能再写「将接入」；
+            // 而 Web 端底图是自绘坐标画布（高德只在移动端配了 Key 时启用），
+            // 设备双向通话也还是一键拨号，所以这两项单独标注为后续增强，
+            // 免得答辩时被追问「底图在哪」答不上来。
+            '导盲杖家属端 · 阶段二已交付\n'
+            '实时定位与告警 · 电子围栏 · 轨迹回放 · 手动定位 · 手杖蓝牙链路\n'
+            '（底图瓦片与设备双向通话为后续增强项）',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
@@ -292,5 +334,64 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       WsStatus.disconnected => '已断开，每 20 秒轮询兜底',
       WsStatus.idle => '未启动',
     };
+  }
+
+  // ---- 手杖蓝牙链路的展示逻辑 ----
+  //
+  // 这里刻意区分「本机已连」和「云端认为已连」：
+  // 蓝牙链路是**一对一**的，同一台手杖同时只能被一台手机持有。
+  // 家里有两台手机时，另一台登录后会看到云端 bleConnected=true，
+  // 但它自己没有链路 —— 如果不区分，那台手机就会显示"已连接"、
+  // 静音按钮也能点，而命令根本没人在执行。
+
+  IconData _caneLinkIcon(CaneSessionState session, DeviceInfo? device) {
+    if (session.connected) {
+      return Icons.bluetooth_connected;
+    }
+    if (session.connecting || session.scanning) {
+      return Icons.bluetooth_searching;
+    }
+    if (device?.bleConnected ?? false) {
+      // 云端有别端持有链路
+      return Icons.bluetooth;
+    }
+    return Icons.bluetooth_disabled;
+  }
+
+  Color _caneLinkColor(
+    CaneSessionState session,
+    DeviceInfo? device,
+    ThemeData theme,
+  ) {
+    if (session.connected) {
+      return AppTheme.healthy;
+    }
+    if (session.connecting || session.scanning) {
+      return AppTheme.warning;
+    }
+    if (device?.bleConnected ?? false) {
+      return theme.colorScheme.primary;
+    }
+    return theme.colorScheme.error;
+  }
+
+  String _caneLinkText(CaneSessionState session, DeviceInfo? device) {
+    if (device == null) {
+      return '尚未绑定导盲杖';
+    }
+    if (session.connected) {
+      final rssi = session.rssi == null ? '' : ' · ${session.rssi} dBm';
+      return '本机已连接$rssi，实时接收避障数据';
+    }
+    if (session.connecting) {
+      return '连接中…';
+    }
+    if (session.scanning) {
+      return '正在扫描附近的 ${BleProtocol.deviceName}…';
+    }
+    if (device.bleConnected) {
+      return '链路由其他家属端持有（蓝牙同一时刻只能连一台手机）';
+    }
+    return '未连接 · 点此连接后即可看到实时测距';
   }
 }

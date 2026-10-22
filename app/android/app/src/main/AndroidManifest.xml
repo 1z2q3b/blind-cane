@@ -1,4 +1,28 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ===== BLE 扫描/连接权限 =====
+         Android 12 (API 31) 起蓝牙权限被拆成 SCAN / CONNECT 两条运行时权限，
+         并且不再需要定位权限；而 API 30 及以下必须靠 ACCESS_FINE_LOCATION 才能
+         扫到 BLE 广播。所以这里用 maxSdkVersion=30 把旧权限限制在旧系统上，
+         避免新系统申请一个永远不会被授予的权限导致扫描直接失败。 -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="30" />
+
+    <!-- 蓝牙本身：声明为可选，没有蓝牙的设备（如部分平板）仍可安装并走模拟模式 -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
+    <!-- ===== 高德地图 SDK 必需权限 =====
+         底图瓦片是联网加载的，没有 INTERNET 时原生地图只能显示灰底网格，
+         且 SDK 不会报错——表现为"地图一片空白"，非常难排查。
+         ACCESS_NETWORK_STATE 用于 SDK 判断当前是否联网（离线走缓存）。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application
         android:label="cane_guardian"
         android:name="${applicationName}"

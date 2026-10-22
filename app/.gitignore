@@ -36,6 +36,9 @@ migrate_working_dir/
 # Symbolication related
 app.*.symbols
 
+# 每次 run-web.sh 构建都会重写的时间戳，属于构建产物，不该进版本库
+.build_stamp
+
 # Obfuscation related
 app.*.map.json
 

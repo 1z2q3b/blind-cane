@@ -45,7 +45,7 @@ class _AlertListPageState extends ConsumerState<AlertListPage> {
   Widget build(BuildContext context) {
     final filter = ref.watch(alertFilterProvider);
     final listState = ref.watch(alertListProvider);
-    final wards = ref.watch(wardListProvider).value ?? const [];
+    final wards = ref.watch(wardListProvider).asData?.value ?? const [];
 
     return Scaffold(
       appBar: AppBar(

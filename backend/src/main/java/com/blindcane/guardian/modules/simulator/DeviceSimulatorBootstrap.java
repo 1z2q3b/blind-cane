@@ -12,6 +12,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 
 /**
  * 演示设备注册：应用启动时确保存在一台可被绑定的导盲杖。
@@ -32,11 +33,23 @@ public class DeviceSimulatorBootstrap implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         BlindcaneProperties.Simulator sim = properties.getSimulator();
         String sn = sim.getDemoDeviceSn();
+        String demoBleAddress = sim.getDemoBleAddress();
 
         Device existing = deviceMapper.selectOne(Wrappers.<Device>lambdaQuery().eq(Device::getDeviceSn, sn));
         if (existing != null) {
-            log.info("演示设备已存在，跳过注册: sn={}, deviceId={}, 绑定状态={}",
-                    sn, existing.getId(), existing.getWardId() == null ? "未绑定" : "已绑定 wardId=" + existing.getWardId());
+            // 补齐 BLE 字段：旧库里的演示设备是 V2 迁移之前注册的，没有蓝牙地址。
+            // 没有地址就跑不了 Mock 扫描列表，所以这里顺手补登一次（幂等）
+            if (existing.getBleAddress() == null && demoBleAddress != null && !demoBleAddress.isBlank()) {
+                Device patch = new Device();
+                patch.setId(existing.getId());
+                patch.setBleAddress(demoBleAddress.toUpperCase(Locale.ROOT));
+                deviceMapper.updateById(patch);
+                log.info("已为演示设备补登虚拟蓝牙地址: sn={}, bleAddress={}", sn, demoBleAddress);
+            } else {
+                log.info("演示设备已存在，跳过注册: sn={}, deviceId={}, 绑定状态={}",
+                        sn, existing.getId(),
+                        existing.getWardId() == null ? "未绑定" : "已绑定 wardId=" + existing.getWardId());
+            }
             return;
         }
 
@@ -49,8 +62,15 @@ public class DeviceSimulatorBootstrap implements ApplicationRunner {
         device.setLastOnlineAt(LocalDateTime.now());
         device.setFirmwareVersion(sim.getDemoFirmware());
         device.setOfflineNotified(Device.OFFLINE_NOTIFIED_NO);
+        if (demoBleAddress != null && !demoBleAddress.isBlank()) {
+            device.setBleAddress(demoBleAddress.toUpperCase(Locale.ROOT));
+        }
+        // BLE 运行态显式给初值，避免 NULL 让「首帧判定已连接」那条分支走偏
+        device.setMuteMode(Device.MUTE_OFF);
+        device.setBleConnected(Device.BLE_DISCONNECTED);
         deviceMapper.insert(device);
 
-        log.info("演示设备注册成功: sn={}, 初始电量={}%, deviceId={}", sn, sim.getInitialBattery(), device.getId());
+        log.info("演示设备注册成功: sn={}, 初始电量={}%, bleAddress={}, deviceId={}",
+                sn, sim.getInitialBattery(), device.getBleAddress(), device.getId());
     }
 }

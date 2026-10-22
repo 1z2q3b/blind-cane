@@ -26,6 +26,15 @@ public class Ward {
 
     private String homeAddress;
 
+    /** 家庭住址经度（家属手动定位后写入，可空）。 */
+    private Double homeLng;
+
+    /** 家庭住址纬度（家属手动定位后写入，可空）。 */
+    private Double homeLat;
+
+    /** 被监护人随身电话，一键拨号用。空串表示未填写（不是 null，见 V4 迁移说明）。 */
+    private String contactPhone;
+
     /** 病史备注，落库前由 AesCryptoUtil 加密成 Base64 密文。 */
     private String medicalNotes;
 

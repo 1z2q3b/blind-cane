@@ -3,6 +3,7 @@ package com.blindcane.guardian.modules.ward.controller;
 import com.blindcane.guardian.common.result.ApiResponse;
 import com.blindcane.guardian.framework.security.CurrentUserHolder;
 import com.blindcane.guardian.modules.ward.dto.WardCreateRequest;
+import com.blindcane.guardian.modules.ward.dto.WardDeleteResultVO;
 import com.blindcane.guardian.modules.ward.dto.WardDetailVO;
 import com.blindcane.guardian.modules.ward.dto.WardUpdateRequest;
 import com.blindcane.guardian.modules.ward.dto.WardVO;
@@ -11,6 +12,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -54,5 +56,13 @@ public class WardController {
     public ApiResponse<WardDetailVO> update(@PathVariable("id") Long id,
                                             @Valid @RequestBody WardUpdateRequest request) {
         return ApiResponse.success(wardService.update(CurrentUserHolder.requireUserId(), id, request));
+    }
+
+    @Operation(summary = "删除被监护人档案",
+            description = "仅主监护人可调用。会连带清理该档案的围栏、位置流水、告警历史与监护关系；"
+                    + "已绑定的手杖会被解绑（不删除设备本身）")
+    @DeleteMapping("/{id}")
+    public ApiResponse<WardDeleteResultVO> delete(@PathVariable("id") Long id) {
+        return ApiResponse.success(wardService.delete(CurrentUserHolder.requireUserId(), id));
     }
 }

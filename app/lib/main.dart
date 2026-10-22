@@ -10,6 +10,46 @@ import 'state/alert_state.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 渲染异常兜底：debug 下 Flutter 会画红色错误块，但 Web / release 下
+  // 一个 build 异常只留下一片空白，让人分不清"没数据"还是"崩了"。
+  // 统一换成可读的错误卡片，至少能看到异常类型和原因。
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Container(
+        color: const Color(0xFFF8F9FA),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 40, color: Color(0xFFD85A30)),
+            const SizedBox(height: 12),
+            const Text(
+              '界面渲染出错',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF2C2C2A),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              details.exceptionAsString(),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                color: Color(0xFF5F5E5A),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  };
+
   // TokenStore 依赖 SharedPreferences，必须在 runApp 之前初始化完成：
   // 否则首帧渲染时登录态还是空的，会先闪一下登录页再跳首页
   final store = await TokenStore.create();

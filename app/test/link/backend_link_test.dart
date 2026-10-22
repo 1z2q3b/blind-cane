@@ -27,19 +27,24 @@ import 'package:cane_guardian/core/ws/ws_client.dart';
 import 'package:cane_guardian/data/guardian_repository.dart';
 import 'package:cane_guardian/models/alert.dart';
 import 'package:cane_guardian/models/device_info.dart';
+import 'package:cane_guardian/models/user_info.dart';
 import 'package:cane_guardian/models/ward.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 演示账号（来自后端 V1 迁移的种子数据）：必须是 ward 1 的合法监护人，
-/// 否则接口会正确返回 103001（无监护权限），那是权限拦截生效而不是联调失败。
+/// 演示账号（ward 1 的主监护人，由后端 DemoAccountBootstrap 确保存在）：
+/// 必须是 ward 1 的合法监护人，否则接口会正确返回 103001（无监护权限），
+/// 那是权限拦截生效而不是联调失败。
 const _phone = '13800138000';
-const _smsCode = '123456';
 const _sn = 'BC-2024-DEMO01';
 const _wardId = 1;
 
 bool get _enabled => const bool.fromEnvironment('BACKEND_E2E');
 bool get _slowEnabled => const bool.fromEnvironment('BACKEND_E2E_SLOW');
+
+/// 当前用例轮次里由后端随机生成、经 Mock 响应回显的验证码。
+/// 验证码不再固定，所有登录/注册都必须用「本次发送返回的那个码」。
+late String _sentCode;
 
 Future<void> _waitFor(
   bool Function() condition, {
@@ -85,16 +90,20 @@ void main() {
   });
 
   group('S5 端到端联调（真实后端）', () {
-    test('1. 发送验证码：Mock 短信直回验证码', () async {
+    test('1. 发送验证码：Mock 短信随机生成并随响应回显', () async {
       await repo.mockResetSms(_phone);
       final result = await repo.sendSmsCode(_phone);
       expect(result.mock, isTrue, reason: '开发期应走 Mock 短信通道');
-      expect(result.mockCode, _smsCode, reason: 'Mock 验证码固定为 123456');
+      // 验证码由后端随机生成（不再固定），Mock 模式随响应回显便于演示与联调
+      expect(result.mockCode, isNotNull, reason: 'Mock 模式下响应应回显验证码');
+      expect(result.mockCode, matches(RegExp(r'^\d{6}$')),
+          reason: '验证码应为 6 位随机数字');
       expect(result.expireSeconds, greaterThan(0));
+      _sentCode = result.mockCode!;
     });
 
     test('2. 登录：拿到双令牌并落盘会话', () async {
-      final login = await repo.login(phone: _phone, smsCode: _smsCode);
+      final login = await repo.login(phone: _phone, smsCode: _sentCode);
       expect(login.accessToken, isNotEmpty);
       expect(login.refreshToken, isNotEmpty);
       expect(login.expiresIn, greaterThan(0), reason: '后端应返回 accessToken 有效期');
@@ -305,11 +314,24 @@ void main() {
     });
 
     test('12. 越权拦截：非监护人手机号取不到 ward 1', () async {
-      // 用一个未注册的新号码登录，它会自动注册成一个没有任何监护关系的新用户
+      // 登录不再自动注册（返回 101011），必须走显式注册建一个
+      // 没有任何监护关系的新用户。号码可能在往轮联调里已注册过，
+      // 此时 101010 改用密码登录拿同一账号的令牌，不影响断言目标
       const stranger = '13900139000';
+      const strangerPwd = 'stranger123';
       await repo.mockResetSms(stranger);
-      await repo.sendSmsCode(stranger);
-      final login = await repo.login(phone: stranger, smsCode: _smsCode);
+      final sms = await repo.sendSmsCode(stranger);
+      late final LoginResult login;
+      try {
+        login = await repo.register(
+          phone: stranger,
+          password: strangerPwd,
+          smsCode: sms.mockCode!,
+        );
+      } on ApiException catch (e) {
+        if (e.code != 101010) rethrow;
+        login = await repo.login(phone: stranger, password: strangerPwd);
+      }
 
       // 换到这个新用户的令牌去读 ward 1
       final strangerClient = ApiClient(store: store);

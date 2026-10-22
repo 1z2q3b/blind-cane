@@ -16,15 +16,29 @@ class WardListNotifier extends AsyncNotifier<List<Ward>> {
   Future<List<Ward>> build() async {
     final repository = ref.watch(repositoryProvider);
     final wards = await repository.listWards();
+    final store = ref.read(tokenStoreProvider);
+
+    if (wards.isEmpty) {
+      // 关键：一个档案都不剩时必须把本地的 currentWardId 抹掉。
+      // 否则它会一直指向一个已经被删除的 id，首页、位置轮询、告警都会
+      // 拿着这个 id 去请求，然后被后端一路 103001 拒绝——
+      // 表现就是"删完档案之后到处都在报无监护权限"。
+      if (store.currentWardId != null) {
+        // 只清持久化，不在这里改 selectedWardIdProvider：
+        // 在 build 期间（哪怕是微任务里）改别的 provider 会触发 layout 重入，
+        // Flutter 的 assert(!_debugDoingThisLayout) 会直接炸掉整棵树。
+        // 内存态由 SelectedWardNotifier.build 自己按列表有效性判断。
+        await store.setCurrentWardId(null);
+      }
+      return wards;
+    }
+
     // 首次拿到数据后，若还没选过被监护人，默认选第一个：
     // 家属通常只监护一个人，多一步选择只是多余操作。
-    if (wards.isNotEmpty) {
-      final store = ref.read(tokenStoreProvider);
-      final current = store.currentWardId;
-      if (current == null || !wards.any((w) => w.id == current)) {
-        await store.setCurrentWardId(wards.first.id);
-        _selectedId = wards.first.id;
-      }
+    final current = store.currentWardId;
+    if (current == null || !wards.any((w) => w.id == current)) {
+      await store.setCurrentWardId(wards.first.id);
+      _selectedId = wards.first.id;
     }
     return wards;
   }
@@ -48,6 +62,9 @@ class WardListNotifier extends AsyncNotifier<List<Ward>> {
     String? relation,
     int? birthYear,
     String? homeAddress,
+    double? homeLng,
+    double? homeLat,
+    String? contactPhone,
     String? medicalNotes,
   }) async {
     final detail = await ref.read(repositoryProvider).createWard(
@@ -55,6 +72,9 @@ class WardListNotifier extends AsyncNotifier<List<Ward>> {
           relation: relation,
           birthYear: birthYear,
           homeAddress: homeAddress,
+          homeLng: homeLng,
+          homeLat: homeLat,
+          contactPhone: contactPhone,
           medicalNotes: medicalNotes,
         );
     await refresh();
@@ -67,6 +87,9 @@ class WardListNotifier extends AsyncNotifier<List<Ward>> {
     String? relation,
     int? birthYear,
     String? homeAddress,
+    double? homeLng,
+    double? homeLat,
+    String? contactPhone,
     String? medicalNotes,
   }) async {
     final detail = await ref.read(repositoryProvider).updateWard(
@@ -75,6 +98,9 @@ class WardListNotifier extends AsyncNotifier<List<Ward>> {
           relation: relation,
           birthYear: birthYear,
           homeAddress: homeAddress,
+          homeLng: homeLng,
+          homeLat: homeLat,
+          contactPhone: contactPhone,
           medicalNotes: medicalNotes,
         );
     await refresh();
@@ -90,6 +116,28 @@ class WardListNotifier extends AsyncNotifier<List<Ward>> {
     await ref.read(repositoryProvider).unbindDevice(deviceId);
     await refresh();
   }
+
+  /// 删除档案。
+  ///
+  /// 服务端会把该档案的围栏、轨迹、告警一起清掉并解绑设备，所以本地只需三件事：
+  /// 作废详情缓存、把选中态从已删除的 id 上移开、刷新列表。
+  /// 漏掉选中态那步的后果是：本地还记着一个不存在的 wardId，首页所有请求都会 404。
+  Future<void> remove(int wardId) async {
+    await ref.read(repositoryProvider).deleteWard(wardId);
+    ref.invalidate(wardDetailProvider(wardId));
+
+    if (ref.read(selectedWardIdProvider) == wardId) {
+      await ref.read(selectedWardIdProvider.notifier).select(null);
+    }
+
+    await refresh();
+
+    // 删完之后如果还有别的档案，自动选第一个，别让首页停在"未选择"的空态
+    final rest = state.value ?? const [];
+    if (ref.read(selectedWardIdProvider) == null && rest.isNotEmpty) {
+      await ref.read(selectedWardIdProvider.notifier).select(rest.first.id);
+    }
+  }
 }
 
 final wardListProvider =
@@ -98,7 +146,18 @@ final wardListProvider =
 /// 当前选中的被监护人 id，持久化到本地。
 class SelectedWardNotifier extends Notifier<int?> {
   @override
-  int? build() => ref.watch(tokenStoreProvider).currentWardId;
+  int? build() {
+    final stored = ref.watch(tokenStoreProvider).currentWardId;
+    final wards = ref.watch(wardListProvider).asData?.value;
+    // 列表已经拿到、但存的 id 不在里面（档案被删了）→ 视为未选中。
+    // 用声明式判断，而不是在其他地方 setState 去改：删除档案后如果在
+    // build/layout 期间改这个 provider，会触发 Flutter 的布局重入断言，
+    // 整个界面直接白屏。这里是纯读计算，不会产生这种副作用。
+    if (wards != null && (wards.isEmpty || !wards.any((w) => w.id == stored))) {
+      return null;
+    }
+    return stored;
+  }
 
   Future<void> select(int? wardId) async {
     if (state == wardId) {
@@ -114,7 +173,9 @@ final selectedWardIdProvider =
 
 /// 当前选中的被监护人对象（从列表快照里取）。
 final currentWardProvider = Provider<Ward?>((ref) {
-  final wards = ref.watch(wardListProvider).value;
+  // asData 而不是 value：value 在 error 态会把异常重新抛出来，
+  // 而这个 provider 被首页等大量 Widget watch，一旦抛出就是整页白屏
+  final wards = ref.watch(wardListProvider).asData?.value;
   if (wards == null || wards.isEmpty) {
     return null;
   }
@@ -147,9 +208,14 @@ class LiveDeviceNotifier extends Notifier<DeviceInfo?> {
 
   /// 只更新推送里带的那几个字段。
   ///
-  /// 后端 `/device` 主题的载荷刻意保持精简（online/battery/signalLevel），
-  /// 如果直接用推送覆盖整个对象，`deviceSn`、`firmwareVersion` 这些
-  /// 只来自 REST 的字段会被清空，界面上就会突然出现空白。
+  /// 后端 `/device` 主题的载荷刻意保持精简（online/battery/signalLevel/bleConnected/
+  /// obstacle*），如果直接用推送覆盖整个对象，`deviceSn`、`firmwareVersion`、
+  /// `bleAddress` 这些只来自 REST 的字段会被清空，界面上就会突然出现空白。
+  ///
+  /// 障碍字段的处理要特别小心：推送里 `bleConnected=false` 时
+  /// `obstacleStatus` 虽然还有值，但那是「断开前的最后读数」。
+  /// 这里如实存下来，由界面按 [DeviceInfo.hasLiveObstacle] 决定怎么显示 ——
+  /// 直接把它抹成 null 会丢掉「最后状态」这个有用信息。
   void applyStatus(DeviceStatusMessage message) {
     final current = state;
     if (current == null) {
@@ -166,6 +232,23 @@ class LiveDeviceNotifier extends Notifier<DeviceInfo?> {
       lastOnlineAt: message.online ? DateTime.now() : current.lastOnlineAt,
       offlineSeconds: message.online ? 0 : current.offlineSeconds,
       firmwareVersion: current.firmwareVersion,
+      bleAddress: current.bleAddress,
+      bleConnected: message.bleConnected,
+      bleConnectedAt: message.bleConnected != current.bleConnected
+          ? DateTime.now()
+          : current.bleConnectedAt,
+      // 断开时后端已把 bleRssi 置空，这里同步成 null，
+      // 否则会显示「蓝牙已断开 · 信号 -57dBm」这种自相矛盾的组合
+      bleRssi: message.bleConnected ? current.bleRssi : null,
+      obstacleStatus: message.obstacleStatus ?? current.obstacleStatus,
+      obstacleDistanceCm:
+          message.obstacleDistanceCm ?? current.obstacleDistanceCm,
+      obstacleReportedAt:
+          message.obstacleReportedAt ?? current.obstacleReportedAt,
+      obstacleSeconds: message.obstacleReportedAt == null
+          ? current.obstacleSeconds
+          : DateTime.now().difference(message.obstacleReportedAt!).inSeconds,
+      muteMode: message.muteMode ?? current.muteMode,
     );
   }
 

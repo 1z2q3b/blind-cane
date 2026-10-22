@@ -9,6 +9,7 @@ import com.blindcane.guardian.framework.security.JwtTokenService;
 import com.blindcane.guardian.framework.security.TokenBlacklistService;
 import com.blindcane.guardian.modules.auth.dto.LoginRequest;
 import com.blindcane.guardian.modules.auth.dto.LoginResponse;
+import com.blindcane.guardian.modules.auth.dto.RegisterRequest;
 import com.blindcane.guardian.modules.auth.dto.SmsCodeResponse;
 import com.blindcane.guardian.modules.auth.dto.UserInfoVO;
 import com.blindcane.guardian.modules.auth.service.AuthService;
@@ -20,8 +21,10 @@ import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.security.SecureRandom;
 import java.time.Duration;
@@ -32,6 +35,14 @@ import java.time.Duration;
  * <p>验证码、发送间隔、每日上限全部放 Redis：
  * 这些数据生命周期短（5 分钟 ~ 1 天），天然适合 TTL 自动清理，
  * 且多实例部署时不需要额外做同步。
+ *
+ * <p>登录支持两种方式（二选一）：
+ * <ul>
+ *   <li><b>验证码登录</b>：证明「当前持有该手机号」，适合忘记密码的场景；</li>
+ *   <li><b>密码登录</b>：证明「知道账号的秘密」，适合日常快速进入。</li>
+ * </ul>
+ * 注册是显式流程（手机号 + 密码 + 验证码），不再有「登录时顺带注册」——
+ * 否则密码登录的账号语义会说不通（没设过密码的号码也能进系统）。
  */
 @Slf4j
 @Service
@@ -52,6 +63,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtTokenService jwtTokenService;
     private final TokenBlacklistService tokenBlacklistService;
     private final BlindcaneProperties properties;
+    private final PasswordEncoder passwordEncoder;
 
     @Override
     public SmsCodeResponse sendSmsCode(String phone) {
@@ -83,8 +95,12 @@ public class AuthServiceImpl implements AuthService {
                     : ErrorCode.SMS_SEND_TOO_FREQUENT);
         }
 
-        // 3) 生成验证码：真实短信走随机码，Mock 走固定码
-        String code = smsProps.isEnabled() ? randomCode() : smsProps.getMockCode();
+        // 3) 生成验证码：**后端随机生成**，Mock 与真实短信同一套逻辑。
+        //    之前 Mock 模式用固定码，演示时确实省事，但固定码会让
+        //    「发送间隔 / 每日上限 / 一次性消费」这三条防护形同虚设，
+        //    且真实联调时行为不一致。随机码的成本只是演示时要看一眼
+        //    日志（Mock 实现的 sendCode 会打印，响应体也回显）。
+        String code = randomCode();
         Boolean stored = redisGuard.call(() -> {
             redisTemplate.opsForValue().set(KEY_SMS_CODE + phone, code,
                     Duration.ofSeconds(smsProps.getCodeTtlSeconds()));
@@ -93,6 +109,7 @@ public class AuthServiceImpl implements AuthService {
         if (!Boolean.TRUE.equals(stored)) {
             throw BizException.of(ErrorCode.SMS_SERVICE_UNAVAILABLE);
         }
+        // Mock 实现只打日志；接入真实短信后由对应实现发送，验证码同样来自这里
         smsSender.sendCode(phone, code);
 
         return new SmsCodeResponse(smsSender.isMock(),
@@ -102,16 +119,55 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public LoginResponse register(RegisterRequest request) {
+        String phone = request.phone();
+        // 注册也要校验验证码：这是「号码确实在本人手中」的唯一凭据，
+        // 没有它，别人可以先用你的手机号注册、设置密码，把你挡在门外
+        verifySmsCode(phone, request.smsCode());
+
+        FamilyUser existing = familyUserMapper.selectOne(
+                Wrappers.<FamilyUser>lambdaQuery().eq(FamilyUser::getPhone, phone));
+        if (existing != null) {
+            throw BizException.of(ErrorCode.PHONE_ALREADY_REGISTERED);
+        }
+
+        FamilyUser user = new FamilyUser();
+        user.setPhone(phone);
+        user.setPasswordHash(passwordEncoder.encode(request.password()));
+        // 默认昵称用尾号，注册后可在设置页修改
+        user.setNickname("家属" + phone.substring(phone.length() - 4));
+        user.setStatus(FamilyUser.STATUS_NORMAL);
+        familyUserMapper.insert(user);
+        log.info("新家属注册成功: userId={}, phone={}", user.getId(), phone);
+
+        // 注册即登录：省掉用户再输一次密码，也让自动化脚本少一次往返
+        return issueTokens(user);
+    }
+
+    @Override
     public LoginResponse login(LoginRequest request) {
         String phone = request.phone();
-        verifySmsCode(phone, request.smsCode());
+        boolean hasSmsCode = StringUtils.hasText(request.smsCode());
+        boolean hasPassword = StringUtils.hasText(request.password());
+        if (hasSmsCode == hasPassword) {
+            // 同时传：不知道用户想用哪种，蒙一个会在另一种失败时给出误导性提示；
+            // 都不传：直接告诉他要选一种
+            throw BizException.of(ErrorCode.LOGIN_METHOD_REQUIRED);
+        }
 
         FamilyUser user = familyUserMapper.selectOne(
                 Wrappers.<FamilyUser>lambdaQuery().eq(FamilyUser::getPhone, phone));
         if (user == null) {
-            user = register(phone);
+            // 不再自动注册：显式注册才能保证密码登录的账号都有密码
+            throw BizException.of(ErrorCode.ACCOUNT_NOT_FOUND);
         }
         assertAccountUsable(user);
+
+        if (hasSmsCode) {
+            verifySmsCode(phone, request.smsCode());
+        } else {
+            assertPasswordMatches(user, request.password());
+        }
 
         return issueTokens(user);
     }
@@ -138,7 +194,7 @@ public class AuthServiceImpl implements AuthService {
         assertAccountUsable(user);
 
         // 不做 refreshToken 轮换：家属端是多设备场景，轮换会导致同账号其他设备被踢下线。
-        // 到期（7 天）后必须重新用验证码登录。
+        // 到期（7 天）后必须重新用验证码或密码登录。
         JwtTokenService.IssuedToken accessToken = jwtTokenService.issueAccessToken(user.getId(), user.getPhone());
         return new LoginResponse(accessToken.token(), refreshToken, TOKEN_TYPE_BEARER,
                 accessTokenTtlSeconds(), toUserInfo(user));
@@ -172,15 +228,20 @@ public class AuthServiceImpl implements AuthService {
         redisGuard.run(() -> redisTemplate.delete(codeKey));
     }
 
-    private FamilyUser register(String phone) {
-        FamilyUser user = new FamilyUser();
-        user.setPhone(phone);
-        // 默认昵称用尾号，家属首次登录后可在设置页修改
-        user.setNickname("家属" + phone.substring(phone.length() - 4));
-        user.setStatus(FamilyUser.STATUS_NORMAL);
-        familyUserMapper.insert(user);
-        log.info("新家属注册成功: userId={}, phone={}", user.getId(), phone);
-        return user;
+    /**
+     * 密码校验。
+     *
+     * <p>未设置密码的账号（验证码自动注册时代创建的）走 101013 而不是笼统的
+     * 「密码错误」——提示「请用验证码登录」用户知道下一步做什么，
+     * 而「密码错误」会让人反复重试一个永远不可能成功的密码。
+     */
+    private void assertPasswordMatches(FamilyUser user, String rawPassword) {
+        if (!StringUtils.hasText(user.getPasswordHash())) {
+            throw BizException.of(ErrorCode.PASSWORD_NOT_SET);
+        }
+        if (!passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
+            throw BizException.of(ErrorCode.PASSWORD_ERROR);
+        }
     }
 
     private void assertAccountUsable(FamilyUser user) {

@@ -42,6 +42,15 @@ dependencies:
   intl: ^0.20.3
   web_socket_channel: ^3.0.3
   url_launcher: ^6.3.2
+  # BLE：手机作为 Central 直连 ESP32-S3 手杖（Nordic UART Service）
+  flutter_blue_plus: ^2.3.12
+  # 高德地图：**仅 Android/iOS**。该插件基于高德原生 SDK，没有 Web 实现，
+  # 因此 Web 端通过 core/map/smart_map_view.dart 的条件导入回退到自绘画布。
+  # 不要在任何会被 Web 编译到的文件里直接 import amap_flutter_map。
+  amap_flutter_map: ^3.0.0
+  # LatLng / AMapApiKey / 隐私声明等基础类型在这个包里，
+  # 原生实现要直接引用它，所以显式声明（不靠传递依赖）
+  amap_flutter_base: ^3.0.0
 
 dev_dependencies:
   flutter_test:
@@ -64,6 +73,16 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # 中文字体必须打进包里，不能让 CanvasKit 运行时去 fonts.gstatic.com 拉。
+  # 原因：Flutter Web 的 CanvasKit 没有系统字体可用，遇到未打包的汉字会
+  # 现拉 Google Fonts 的思源黑体；一旦网络不通（或被重置），
+  # 整个页面的中文全是豆腐块 □□□，观感就是"打开没有内容"。
+  # 这个字体随包分发，彻底消除对外网的依赖（体积换正确性）。
+  fonts:
+    - family: NotoSansSC
+      fonts:
+        - asset: assets/fonts/NotoSansSC-VF.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

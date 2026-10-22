@@ -64,7 +64,14 @@ public class DeviceOfflineDetectTask {
             patch.setOnline(Device.OFFLINE);
             patch.setSignalLevel(0);
             patch.setOfflineNotified(Device.OFFLINE_NOTIFIED_YES);
+            // 设备都掉线了，手机与它之间不可能还保持着蓝牙链路。
+            // 不置位的话，广播出去的载荷会同时带
+            // online=false 与 bleConnected=true，家属端将显示「离线但蓝牙已连接」
+            patch.setBleConnected(Device.BLE_DISCONNECTED);
+            patch.setBleConnectedAt(LocalDateTime.now());
             deviceMapper.updateById(patch);
+            device.setOnline(Device.OFFLINE);
+            device.setBleConnected(Device.BLE_DISCONNECTED);
 
             log.warn("设备离线告警: sn={}, wardId={}, 最后上报={}",
                     device.getDeviceSn(), device.getWardId(), device.getLastOnlineAt());
@@ -72,9 +79,11 @@ public class DeviceOfflineDetectTask {
                     .simple(device.getWardId(), device.getId(), AlertType.DEVICE_OFFLINE)
                     .withNote("导盲杖已超过 " + thresholdMinutes + " 分钟未上报数据"));
 
-            // 同步推一次设备状态，让家属端首页徽章立刻从"在线"翻成"离线"
+            // 同步推一次设备状态，让家属端首页徽章立刻从"在线"翻成"离线"。
+            // 用 offline() 而不是手工拼字段：它会把 bleConnected 一并置 false，
+            // 并把障碍字段保留为「断开前的最后读数」
             wsMessageSender.sendDeviceStatus(device.getWardId(),
-                    new DeviceStatusMessage(false, device.getBattery(), 0));
+                    DeviceStatusMessage.offline(device));
         }
     }
 }

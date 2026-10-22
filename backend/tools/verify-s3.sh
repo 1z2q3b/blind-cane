@@ -6,8 +6,10 @@ set -u
 PORT="${PORT:-8001}"
 BASE="http://127.0.0.1:$PORT"
 MYSQL="/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql"
-REDIS="/d/redis/redis-cli"
-NODE="C:/Users/Lenovo/.workbuddy/binaries/node/versions/22.22.2-2/node.exe"
+# 本机 Redis 带 requirepass 且后端固定用 1 号库（见 application-dev.yml），
+# 裸 redis-cli 会因认证失败拿到空值，把「热数据缺失」误报成「陈旧」
+REDIS="/d/redis/redis-cli -a 123456 -n 1"
+NODE="C:/Users/Lenovo/.workbuddy/binaries/node/versions/22.22.2-6/node.exe"
 export NODE_PATH="C:/Users/Lenovo/.workbuddy/binaries/node/workspace/node_modules"
 
 DB="blind_cane_guardian"
@@ -34,9 +36,11 @@ curl -s --noproxy '*' -X POST "$BASE/api/v1/auth/sms/send" \
   -H "Content-Type: application/json" \
   -d "{\"phone\":\"$PHONE\"}" > "$TMP/sms.json"
 echo "  发送验证码: $(head -c 200 "$TMP/sms.json")"
+# 验证码由后端随机生成，Mock 模式下从发送响应里取（不再有固定码）
+SMS_CODE=$(cat "$TMP/sms.json" | "$NODE" "$WINROOT/tools/json-get.js" data.mockCode)
 curl -s --noproxy '*' -X POST "$BASE/api/v1/auth/login" \
   -H "Content-Type: application/json" \
-  -d "{\"phone\":\"$PHONE\",\"smsCode\":\"123456\"}" > "$TMP/login.json"
+  -d "{\"phone\":\"$PHONE\",\"smsCode\":\"$SMS_CODE\"}" > "$TMP/login.json"
 TOKEN=$(cat "$TMP/login.json" | "$NODE" "$WINROOT/tools/json-get.js" data.accessToken)
 if [ -n "$TOKEN" ]; then pass "获取 accessToken (${TOKEN:0:24}...)"; else
   fail "登录失败: $(cat "$TMP/login.json")"; exit 1; fi
@@ -62,7 +66,7 @@ for i in 1 2 3; do
 done
 
 echo "== 5. 校验 Redis 热数据 =="
-HOT=$("$REDIS" GET "loc:ward:$WARD_ID" 2>/dev/null)
+HOT=$($REDIS GET "loc:ward:$WARD_ID" 2>/dev/null)
 if [ -n "$HOT" ]; then pass "loc:ward:$WARD_ID 命中"; else fail "Redis 热数据缺失"; fi
 echo "  $HOT"
 # 只断言"非空"太弱：模拟器位置漂移会持续覆盖同一个 key，
@@ -99,11 +103,22 @@ echo "  --- 订阅被拒/错误帧检查 ---"
 if grep -q "ERROR" "$TMP/ws.log"; then fail "出现 ERROR 帧"; grep "ERROR" "$TMP/ws.log"; else pass "无 ERROR 帧（订阅权限校验通过）"; fi
 
 echo "== 9. 越权校验（非监护人应被拒绝） =="
-curl -s --noproxy '*' -X POST "$BASE/api/v1/mock/sms/reset?phone=13800000001" > /dev/null
+# 登录不再自动注册：先用显式注册建一个没有任何监护关系的新用户；
+# 号码在往轮验证里已注册过时（101010），退回密码登录拿同一账号的令牌。
+# 注意别用历史遗留的「无密码账号」号段（13800000001 等自动注册时代的号码），
+# 那些号密码登录会返 101013，拿不到令牌
+curl -s --noproxy '*' -X POST "$BASE/api/v1/mock/sms/reset?phone=13800000002" > /dev/null
 curl -s --noproxy '*' -X POST "$BASE/api/v1/auth/sms/send" \
-  -H "Content-Type: application/json" -d '{"phone":"13800000001"}' > /dev/null
-curl -s --noproxy '*' -X POST "$BASE/api/v1/auth/login" \
-  -H "Content-Type: application/json" -d '{"phone":"13800000001","smsCode":"123456"}' > "$TMP/login2.json"
+  -H "Content-Type: application/json" -d '{"phone":"13800000002"}' > "$TMP/sms2.json"
+SMS2=$(cat "$TMP/sms2.json" | "$NODE" "$WINROOT/tools/json-get.js" data.mockCode)
+curl -s --noproxy '*' -X POST "$BASE/api/v1/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"phone\":\"13800000002\",\"password\":\"stranger123\",\"smsCode\":\"$SMS2\"}" > "$TMP/login2.json"
+if [ -z "$(cat "$TMP/login2.json" | "$NODE" "$WINROOT/tools/json-get.js" data.accessToken)" ]; then
+  curl -s --noproxy '*' -X POST "$BASE/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"phone":"13800000002","password":"stranger123"}' > "$TMP/login2.json"
+fi
 TOKEN2=$(cat "$TMP/login2.json" | "$NODE" "$WINROOT/tools/json-get.js" data.accessToken)
 DENY=$(curl -s --noproxy '*' "$BASE/api/v1/locations/realtime?wardId=$WARD_ID" -H "Authorization: Bearer $TOKEN2")
 echo "  非监护人读取 ward $WARD_ID 实时位置: $(echo "$DENY" | head -c 160)"

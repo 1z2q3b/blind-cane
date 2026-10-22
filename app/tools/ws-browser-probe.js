@@ -132,9 +132,9 @@ async function main() {
   fs.mkdirSync(path.join(__dirname, '..', 'target', 'ui'), { recursive: true });
 
   await api(`/api/v1/mock/sms/reset?phone=${PHONE}`);
-  await api('/api/v1/auth/sms/send', { body: { phone: PHONE } });
+  const sms = await api('/api/v1/auth/sms/send', { body: { phone: PHONE } });
   const login = await api('/api/v1/auth/login',
-    { body: { phone: PHONE, smsCode: '123456' } });
+    { body: { phone: PHONE, smsCode: sms.mockCode } });
   await api(`/api/v1/mock/devices/${SN}/reset`, { token: login.accessToken });
   console.log(`已取得令牌（长度 ${login.accessToken.length}，不打印内容）`);
 

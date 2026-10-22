@@ -16,12 +16,18 @@ enum WsStatus { idle, connecting, connected, disconnected }
 
 /// 实时推送客户端。
 ///
-/// 订阅后端三个主题（提示词 7.3）：
+/// 订阅后端四个主题：
 /// - `/topic/ward/{id}/location` 位置更新
 /// - `/topic/ward/{id}/alert`    告警
 /// - `/topic/ward/{id}/device`   设备状态
+/// - `/topic/ward/{id}/command`  手杖命令（BLE 接入新增）
 ///
-/// 三个设计取舍：
+/// 第四个主题是「命令下行」链路的一环：家属点按钮 → 后端广播到本主题 →
+/// **与手杖连着蓝牙的那台手机**写入 RX 特征执行。没有手机连着手杖时
+/// 命令就没人执行，所以界面要在按钮上体现「手杖未连接」，
+/// 否则点下去毫无反应会被当成软件故障。
+///
+/// 四个设计取舍：
 /// 1. **自己管重连而不是用 StompConfig.reconnectDelay**：CONNECT 头里的 JWT 是
 ///    建立连接时定死的，用内置重连会在令牌过期后一直拿着旧令牌重试、
 ///    永远连不上。这里每次重连都重新构造 StompConfig，取最新的令牌。
@@ -29,6 +35,8 @@ enum WsStatus { idle, connecting, connected, disconnected }
 ///    避免服务端挂了之后客户端还在高频打请求。
 /// 3. **数据流用 broadcast**：同一个位置更新会同时被首页卡片、地图页、
 ///    轨迹折线三处消费，非广播流只能有一个监听者。
+/// 4. **命令流同样 broadcast**：状态层写 RX 特征、界面显示「已下发」提示，
+///    两处都要消费同一条命令。
 class GuardianWsClient {
   GuardianWsClient(this._store);
 
@@ -37,11 +45,13 @@ class GuardianWsClient {
   final _locationCtrl = StreamController<LatestLocation>.broadcast();
   final _alertCtrl = StreamController<AlertRecord>.broadcast();
   final _deviceCtrl = StreamController<DeviceStatusMessage>.broadcast();
+  final _commandCtrl = StreamController<DeviceCommandMessage>.broadcast();
   final _statusCtrl = StreamController<WsStatus>.broadcast();
 
   Stream<LatestLocation> get locations => _locationCtrl.stream;
   Stream<AlertRecord> get alerts => _alertCtrl.stream;
   Stream<DeviceStatusMessage> get deviceStatuses => _deviceCtrl.stream;
+  Stream<DeviceCommandMessage> get commands => _commandCtrl.stream;
   Stream<WsStatus> get statuses => _statusCtrl.stream;
 
   StompClient? _client;
@@ -53,7 +63,7 @@ class GuardianWsClient {
 
   WsStatus get status => _status;
 
-  /// 连接并订阅某个被监护人的三个主题。
+  /// 连接并订阅某个被监护人的四个主题。
   ///
   /// 重复调用同一个 wardId 是幂等的；换 ward 会先断开旧订阅再连。
   void connect(int wardId) {
@@ -80,6 +90,7 @@ class GuardianWsClient {
     _locationCtrl.close();
     _alertCtrl.close();
     _deviceCtrl.close();
+    _commandCtrl.close();
     _statusCtrl.close();
   }
 
@@ -145,6 +156,12 @@ class GuardianWsClient {
     _client?.subscribe(
       destination: '/topic/ward/$wardId/device',
       callback: (f) => _emit(_deviceCtrl, f.body, DeviceStatusMessage.fromJson),
+    );
+    // 命令主题：同 ward 下所有家属端都会收到，只有真正与手杖连着的那台
+    // 会去写 RX 特征，其余端忽略（见 CaneSessionNotifier._onCommand）
+    _client?.subscribe(
+      destination: '/topic/ward/$wardId/command',
+      callback: (f) => _emit(_commandCtrl, f.body, DeviceCommandMessage.fromJson),
     );
   }
 

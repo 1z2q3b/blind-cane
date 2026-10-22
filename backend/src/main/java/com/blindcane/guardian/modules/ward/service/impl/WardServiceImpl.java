@@ -9,9 +9,15 @@ import com.blindcane.guardian.modules.alert.mapper.AlertRecordMapper;
 import com.blindcane.guardian.modules.device.dto.DeviceVO;
 import com.blindcane.guardian.modules.device.entity.Device;
 import com.blindcane.guardian.modules.device.mapper.DeviceMapper;
+import com.blindcane.guardian.modules.geofence.entity.Geofence;
+import com.blindcane.guardian.modules.geofence.mapper.GeofenceMapper;
+import com.blindcane.guardian.modules.geofence.service.GeofenceEvaluator;
 import com.blindcane.guardian.modules.location.dto.LatestLocation;
+import com.blindcane.guardian.modules.location.entity.LocationRecord;
+import com.blindcane.guardian.modules.location.mapper.LocationRecordMapper;
 import com.blindcane.guardian.modules.location.service.LocationCacheService;
 import com.blindcane.guardian.modules.ward.dto.WardCreateRequest;
+import com.blindcane.guardian.modules.ward.dto.WardDeleteResultVO;
 import com.blindcane.guardian.modules.ward.dto.WardDetailVO;
 import com.blindcane.guardian.modules.ward.dto.WardUpdateRequest;
 import com.blindcane.guardian.modules.ward.dto.WardVO;
@@ -43,6 +49,9 @@ public class WardServiceImpl implements WardService {
     private final GuardianService guardianService;
     private final AesCryptoUtil aesCryptoUtil;
     private final LocationCacheService locationCacheService;
+    private final GeofenceMapper geofenceMapper;
+    private final LocationRecordMapper locationRecordMapper;
+    private final GeofenceEvaluator geofenceEvaluator;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -52,6 +61,11 @@ public class WardServiceImpl implements WardService {
         ward.setRelation(request.relation());
         ward.setBirthYear(request.birthYear());
         ward.setHomeAddress(request.homeAddress());
+        ward.setHomeLng(request.homeLng());
+        ward.setHomeLat(request.homeLat());
+        // 库里是 NOT NULL DEFAULT ''：这里把 null 归一成空串，
+        // 避免 MyBatis-Plus 插入时显式写 NULL 触发约束错误
+        ward.setContactPhone(request.contactPhone() == null ? "" : request.contactPhone().trim());
         ward.setMedicalNotes(aesCryptoUtil.encrypt(request.medicalNotes()));
         ward.setPrimaryUserId(userId);
         wardMapper.insert(ward);
@@ -100,6 +114,7 @@ public class WardServiceImpl implements WardService {
             Long wardId = ward.getId();
             return new WardVO(
                     wardId, ward.getName(), ward.getRelation(), ward.getBirthYear(), ward.getHomeAddress(),
+                    ward.getHomeLng(), ward.getHomeLat(), ward.getContactPhone(),
                     roleByWard.get(wardId),
                     DeviceVO.from(deviceByWard.get(wardId)),
                     locationCacheService.get(wardId),
@@ -128,6 +143,14 @@ public class WardServiceImpl implements WardService {
         patch.setRelation(request.relation());
         patch.setBirthYear(request.birthYear());
         patch.setHomeAddress(request.homeAddress());
+        // 坐标允许单独更新：家属可能只重新定位而不动文字地址。
+        // 传 null 表示不改；想清空坐标目前没有入口（地址被删掉时坐标留着也无害）。
+        patch.setHomeLng(request.homeLng());
+        patch.setHomeLat(request.homeLat());
+        if (request.contactPhone() != null) {
+            // 空串是"清空号码"的有效语义，不能在这里过滤掉
+            patch.setContactPhone(request.contactPhone().trim());
+        }
         if (request.medicalNotes() != null) {
             patch.setMedicalNotes(aesCryptoUtil.encrypt(request.medicalNotes()));
         }
@@ -136,6 +159,59 @@ public class WardServiceImpl implements WardService {
         log.info("被监护人档案已更新: wardId={}, 操作人={}", wardId, userId);
         Ward updated = wardMapper.selectById(wardId);
         return assemble(updated, relation.getRole());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public WardDeleteResultVO delete(Long userId, Long wardId) {
+        WardGuardian relation = guardianService.requireGuardian(userId, wardId);
+        // 档案归属权只在主监护人手上：副监护人误删会连带清掉所有轨迹和告警，且不可恢复
+        if (!Integer.valueOf(WardGuardian.ROLE_PRIMARY).equals(relation.getRole())) {
+            throw BizException.of(ErrorCode.NO_GUARDIAN_PERMISSION, "只有主监护人可以删除该档案");
+        }
+        requireWard(wardId);
+
+        // 顺序有讲究：先清"挂在档案上的从属数据"，最后删档案本体。
+        // 整套动作在一个事务里，任何一步抛异常都会整体回滚，不会出现删一半留一半。
+
+        // 1) 围栏：纯配置，随档案一起消失
+        List<Long> fenceIds = geofenceMapper.selectList(Wrappers.<Geofence>lambdaQuery()
+                        .select(Geofence::getId)
+                        .eq(Geofence::getWardId, wardId))
+                .stream()
+                .map(Geofence::getId)
+                .toList();
+        int fences = geofenceMapper.delete(Wrappers.<Geofence>lambdaQuery()
+                .eq(Geofence::getWardId, wardId));
+        // Redis 里的 IN/OUT 状态与告警抑制锁必须跟着清，否则 key 会一直残留
+        fenceIds.forEach(geofenceEvaluator::clearState);
+
+        // 2) 位置流水：单表里数据量最大的一张
+        int locations = locationRecordMapper.delete(Wrappers.<LocationRecord>lambdaQuery()
+                .eq(LocationRecord::getWardId, wardId));
+
+        // 3) 告警历史
+        int alerts = alertRecordMapper.delete(Wrappers.<AlertRecord>lambdaQuery()
+                .eq(AlertRecord::getWardId, wardId));
+
+        // 4) 设备只解绑、不删除：手杖是物理硬件，档案没了它还要能绑给下一位老人用。
+        //    必须用 UpdateWrapper.set 显式写 null——updateById 的 NOT_NULL 策略会跳过 null 字段，
+        //    那样这里会变成"什么都没更新"，设备永远挂在已删除的 ward 上。
+        int devices = deviceMapper.update(null, Wrappers.<Device>lambdaUpdate()
+                .set(Device::getWardId, null)
+                .eq(Device::getWardId, wardId));
+
+        // 5) 监护关系：主监护人和所有副监护人一起解除
+        int guardians = wardGuardianMapper.delete(Wrappers.<WardGuardian>lambdaQuery()
+                .eq(WardGuardian::getWardId, wardId));
+
+        // 6) 档案本体
+        wardMapper.deleteById(wardId);
+
+        log.info("被监护人档案已删除: wardId={}, 操作人={}; 连带清理 围栏={} 轨迹={} 告警={} 解绑设备={} 解除关系={}",
+                wardId, userId, fences, locations, alerts, devices, guardians);
+
+        return new WardDeleteResultVO(wardId, fences, locations, alerts, devices, guardians);
     }
 
     // ------------------------------------------------------------------
@@ -164,7 +240,8 @@ public class WardServiceImpl implements WardService {
                                   LatestLocation location, long pendingCount) {
         return new WardDetailVO(
                 ward.getId(), ward.getName(), ward.getRelation(), ward.getBirthYear(),
-                ward.getHomeAddress(), aesCryptoUtil.decrypt(ward.getMedicalNotes()),
+                ward.getHomeAddress(), ward.getHomeLng(), ward.getHomeLat(), ward.getContactPhone(),
+                aesCryptoUtil.decrypt(ward.getMedicalNotes()),
                 ward.getPrimaryUserId(), myRole,
                 DeviceVO.from(device), location, pendingCount, ward.getCreatedAt());
     }

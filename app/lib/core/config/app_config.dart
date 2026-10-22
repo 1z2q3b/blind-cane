@@ -36,6 +36,23 @@ class AppConfig {
   /// 统一的 REST 前缀。
   static const String apiPrefix = '/api/v1';
 
+  /// 构建标识：用来区分「浏览器里跑的到底是哪一次构建」。
+  ///
+  /// 加这个字段的缘由很具体：Flutter Web 的 Service Worker 会把整包缓存住，
+  /// 代码改了、服务也重启了，用户刷新页面拿到的可能还是旧的 main.dart.js，
+  /// 于是「我明明改好了，用户却说没生效」反复出现，排查成本极高。
+  /// 把构建号显式印在登录页和「我的」页，用户扫一眼就能对比
+  /// 手上跑的构建和交付时说好的构建是不是同一个。
+  ///
+  /// 构建时注入（推荐写进构建脚本，别手敲）：
+  /// ```
+  /// flutter build web --dart-define=BUILD_STAMP=20261021-2000
+  /// flutter run -d chrome --dart-define=BUILD_STAMP=20261021-2000
+  /// ```
+  /// 不注入时显示 `dev`，意思是「本地直接跑的未打包构建」。
+  static const String buildStamp =
+      String.fromEnvironment('BUILD_STAMP', defaultValue: 'dev');
+
   /// 网络超时。
   static const Duration connectTimeout = Duration(seconds: 10);
   static const Duration receiveTimeout = Duration(seconds: 15);
@@ -51,5 +68,30 @@ class AppConfig {
   static const bool demoMode = bool.fromEnvironment('DEMO_MODE', defaultValue: true);
 
   /// 紧急联系电话，全屏告警页的「一键拨号」用它兜底。
+  ///
+  /// 只有在被监护人档案没填「随身电话」时才会打到这个号码；
+  /// 填了的话优先拨本人（见 AlertDetailPage / FullScreenAlertPage）。
   static const String emergencyNumber = '120';
+
+  /// 高德地图 Key（**仅 Android/iOS 需要**，Web 端不用、也不支持）。
+  ///
+  /// 申请入口：https://lbs.amap.com/ → 应用管理 → 创建应用 → 添加 Key，
+  /// 平台选「Android」或「iOS」。Android 的 Key 必须与打包签名 SHA1 + 包名绑定。
+  ///
+  /// 通过编译期参数传入，不要把真实 Key 提交进仓库：
+  /// ```
+  /// flutter run --dart-define=AMAP_ANDROID_KEY=你的key
+  /// flutter build apk --dart-define=AMAP_ANDROID_KEY=你的key
+  /// ```
+  ///
+  /// 为空时移动端**不会崩**：SmartMapView 会自动退回自绘网格画布，
+  /// 坐标与轨迹逻辑完全一致，只是没有底图。
+  static const String amapAndroidKey =
+      String.fromEnvironment('AMAP_ANDROID_KEY', defaultValue: '');
+
+  static const String amapIosKey =
+      String.fromEnvironment('AMAP_IOS_KEY', defaultValue: '');
+
+  /// 是否已配置高德 Key。移动端据此决定用真地图还是降级画布。
+  static bool get hasAmapKey => amapAndroidKey.isNotEmpty || amapIosKey.isNotEmpty;
 }

@@ -39,9 +39,8 @@ public class BlindcaneProperties {
 
     @Data
     public static class Sms {
-        /** false = Mock：验证码固定 mockCode 并打日志。 */
+        /** false = Mock：验证码由后端随机生成、打印日志，响应体回显 mockCode。 */
         private boolean enabled = false;
-        private String mockCode = "123456";
         private int intervalSeconds = 60;
         private int codeTtlSeconds = 300;
         private int maxPerDay = 10;
@@ -81,6 +80,12 @@ public class BlindcaneProperties {
         private int initialBattery = 85;
         private String batteryDecayCron = "0 0 * * * *";
         private int fallConfirmTimeoutSeconds = 30;
+        /**
+         * 演示设备的「虚拟蓝牙地址」。真实硬件地址由 ESP32 决定，
+         * 这里给固定值是为了在没有蓝牙硬件时也能跑通
+         * 「绑定 → 连接 → 遥测 → 命令」全链路（见 MockBleController）。
+         */
+        private String demoBleAddress;
     }
 
     @Data
@@ -89,6 +94,18 @@ public class BlindcaneProperties {
         private long offlineScanIntervalMs = 60000;
         private int lowBatteryThreshold = 20;
         private int lowBatteryStep = 10;
+
+        // ------- 以下为 BLE 接入参数（《BLE 对接规格 v1》）-------
+
+        /**
+         * 遥测节流窗口（ms）。手杖 500ms 一帧，靠这个窗口把稳态落库压到 ≤1 次/秒；
+         * 状态变化不受窗口限制，危险状态仍然零延迟可见。
+         */
+        private int telemetryMinIntervalMs = 1000;
+
+        /** 障碍状态阈值：≥nearCm 畅通 / dangerCm~nearCm 有障碍 / &lt;dangerCm 危险。 */
+        private int obstacleNearCm = 100;
+        private int obstacleDangerCm = 20;
     }
 
     @Data

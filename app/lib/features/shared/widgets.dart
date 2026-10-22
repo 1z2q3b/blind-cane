@@ -154,7 +154,8 @@ class EmptyState extends StatelessWidget {
             ],
             if (action != null) ...[
               const SizedBox(height: 24),
-              action!,
+              // 空态 CTA 全宽：主题 minimumSize 宽度为 0，全宽靠 SizedBox 撑
+              SizedBox(width: double.infinity, child: action!),
             ],
           ],
         ),
@@ -188,10 +189,14 @@ class ErrorView extends StatelessWidget {
             ),
             if (onRetry != null) ...[
               const SizedBox(height: 20),
-              OutlinedButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh),
-                label: const Text('重试'),
+              // 全宽 CTA：主题 minimumSize 宽度为 0，全宽靠 SizedBox 撑
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('重试'),
+                ),
               ),
             ],
           ],

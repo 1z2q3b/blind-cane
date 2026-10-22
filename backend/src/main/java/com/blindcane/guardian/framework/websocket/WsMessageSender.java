@@ -2,6 +2,7 @@ package com.blindcane.guardian.framework.websocket;
 
 import com.blindcane.guardian.modules.alert.dto.AlertVO;
 import com.blindcane.guardian.modules.alert.entity.AlertRecord;
+import com.blindcane.guardian.modules.device.dto.DeviceCommandMessage;
 import com.blindcane.guardian.modules.device.dto.DeviceStatusMessage;
 import com.blindcane.guardian.modules.location.dto.LatestLocation;
 import lombok.RequiredArgsConstructor;
@@ -14,11 +15,12 @@ import org.springframework.stereotype.Component;
  *
  * <p>把所有 topic 拼接集中在这里，是为了避免 topic 字符串散落在业务代码里 ——
  * 拼错一个字母的后果是「推送静默失效」，前后端都要花很久才能发现。
- * 三个主题与提示词 7.3 一一对应：
+ * 前三个主题与提示词 7.3 一一对应，第四个是 BLE 接入新增的：
  * <pre>
  * /topic/ward/{wardId}/location  位置更新
  * /topic/ward/{wardId}/alert     告警
  * /topic/ward/{wardId}/device    设备状态
+ * /topic/ward/{wardId}/command   手杖命令下发（由连着蓝牙的那台手机订阅并写 RX 特征）
  * </pre>
  */
 @Slf4j
@@ -29,6 +31,7 @@ public class WsMessageSender {
     private static final String TOPIC_LOCATION = "/topic/ward/%d/location";
     private static final String TOPIC_ALERT = "/topic/ward/%d/alert";
     private static final String TOPIC_DEVICE = "/topic/ward/%d/device";
+    private static final String TOPIC_COMMAND = "/topic/ward/%d/command";
 
     private final SimpMessagingTemplate messagingTemplate;
 
@@ -42,6 +45,10 @@ public class WsMessageSender {
 
     public static String deviceTopic(Long wardId) {
         return String.format(TOPIC_DEVICE, wardId);
+    }
+
+    public static String commandTopic(Long wardId) {
+        return String.format(TOPIC_COMMAND, wardId);
     }
 
     public void sendLocation(Long wardId, LatestLocation location) {
@@ -64,6 +71,21 @@ public class WsMessageSender {
             return;
         }
         send(deviceTopic(wardId), status, "设备状态");
+    }
+
+    /**
+     * 广播一条手杖命令。
+     *
+     * <p>是「广播」而不是「点对点」：后端并不知道哪一台手机正与这根手杖连着蓝牙，
+     * 同 ward 下的所有家属端都会收到，由真正持有 BLE 链路的那台去写 RX 特征，
+     * 其余端忽略。代价是别的家属端也会看到「已下发」的乐观提示 ——
+     * 这个偏差会在 {@code /command/ack} 广播权威状态后被纠正回来。
+     */
+    public void sendCommand(Long wardId, DeviceCommandMessage command) {
+        if (wardId == null) {
+            return;
+        }
+        send(commandTopic(wardId), command, "BLE 命令");
     }
 
     private void send(String destination, Object payload, String what) {

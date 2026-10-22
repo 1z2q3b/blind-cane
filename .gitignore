@@ -1,0 +1,17 @@
+# 敏感配置（真实口令）
+# application.yml 第 19 行用 optional:file:./local-secrets.yml 载入这个文件，
+# 里面放的是 MySQL/Redis 的真实口令。仓库首次提交时它并不存在，
+# 一旦有人创建就会被 git 当成新文件——这里先显式挡掉。
+local-secrets.yml
+*.local.yml
+.env
+.env.*
+
+# 联调产物：里面存着登录换回来的 accessToken / refreshToken 和短信验证码记录，
+# 一旦 push 到远端就等于把令牌公开，必须挡掉。
+/target/verify/
+
+# 调试/临时产物
+*.log
+.DS_Store
+Thumbs.db

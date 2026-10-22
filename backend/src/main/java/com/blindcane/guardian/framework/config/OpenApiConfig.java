@@ -29,7 +29,7 @@ public class OpenApiConfig {
                                 家属监护端后端接口。
                                 统一响应结构：code=0 成功，非 0 为六位错误码（101xxx 认证 / 103xxx 监护 / 104xxx 设备 / 106xxx 告警 / 109xxx 系统）。
                                 演示用 Mock 接口位于 /api/v1/mock/**，仅在 blindcane.simulator.enabled=true 时可用。
-                                短信为 Mock 时验证码固定 123456。"""))
+                                短信为 Mock 时验证码由后端随机生成：看控制台【Mock 短信】日志，或取 /auth/sms/send 响应里的 mockCode。"""))
                 .components(new Components()
                         .addSecuritySchemes(SECURITY_SCHEME_NAME, new SecurityScheme()
                                 .name(SECURITY_SCHEME_NAME)

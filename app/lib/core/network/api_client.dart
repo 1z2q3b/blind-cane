@@ -78,6 +78,12 @@ class ApiClient {
         () => _dio.put<dynamic>(path, data: body, queryParameters: _clean(query)));
   }
 
+  /// DELETE。电子围栏删除需要它；后端 DELETE 接口返回 data 为 null，
+  /// 所以调用方拿到的是 null，不要试图解包。
+  Future<Object?> deleteRaw(String path, {Map<String, dynamic>? query}) {
+    return _send(() => _dio.delete<dynamic>(path, queryParameters: _clean(query)));
+  }
+
   // ------------------------------------------------------------------
   // 拦截器
   // ------------------------------------------------------------------

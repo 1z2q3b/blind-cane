@@ -274,7 +274,7 @@ final fullScreenAlertProvider =
 /// 首页「最近告警」需要的当前被监护人待处理数量。
 final currentWardPendingCountProvider = Provider<int>((ref) {
   final wardId = ref.watch(selectedWardIdProvider);
-  final pending = ref.watch(pendingCountProvider).value;
+  final pending = ref.watch(pendingCountProvider).asData?.value;
   if (wardId == null || pending == null) {
     return 0;
   }
